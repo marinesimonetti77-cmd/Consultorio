@@ -14,6 +14,8 @@
  * ---------------------------------------------------
  */
 
+const SPREADSHEET_ID = '1gXeP_AGWLHLWERC_hdnOqkKblG2dbxRcKwefqIY4GZc';
+
 const SHEETS = {
   pacientes: '1-Pacientes',
   agenda: '2-Agenda',
@@ -93,8 +95,47 @@ function jsonOut(obj) {
     .setMimeType(ContentService.MimeType.JSON);
 }
 
+/**
+ * Crea un evento de Calendar con videollamada de Google Meet asociada
+ * y devuelve el link generado. Se usa para el módulo Teleconsultas.
+ */
+function crearLinkMeet(paciente, fechaStr, horaStr) {
+  const calendar = CalendarApp.getDefaultCalendar();
+
+  // Parsear fecha DD/MM/AAAA y hora HH:MM. Si faltan, usar ahora + 1 hora.
+  let start = new Date();
+  start.setMinutes(0, 0, 0);
+  start.setHours(start.getHours() + 1);
+
+  if (fechaStr) {
+    const parts = String(fechaStr).split('/');
+    if (parts.length === 3) {
+      const [dd, mm, yyyy] = parts.map(p => parseInt(p, 10));
+      let hh = 9, min = 0;
+      if (horaStr) {
+        const hParts = String(horaStr).split(':');
+        hh = parseInt(hParts[0], 10) || 9;
+        min = parseInt(hParts[1], 10) || 0;
+      }
+      start = new Date(yyyy, mm - 1, dd, hh, min);
+    }
+  }
+  const end = new Date(start.getTime() + 30 * 60000); // 30 min de duración
+
+  const event = calendar.createEvent(
+    'Teleconsulta - ' + (paciente || 'Paciente'),
+    start,
+    end,
+    { description: 'Teleconsulta generada automáticamente desde el sistema del consultorio.' }
+  );
+  event.addPopupReminder(15);
+
+  const hangoutLink = event.getHangoutLink ? event.getHangoutLink() : null;
+  return hangoutLink || '';
+}
+
 function getSheet(moduleKey) {
-  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const sheetName = SHEETS[moduleKey];
   if (!sheetName) throw new Error('Módulo desconocido: ' + moduleKey);
   let sheet = ss.getSheetByName(sheetName);
@@ -157,6 +198,14 @@ function getAllData() {
 }
 
 function addRow(moduleKey, rowObj) {
+  if (moduleKey === 'teleconsultas' && !rowObj['Link Meet / Zoom']) {
+    try {
+      rowObj['Link Meet / Zoom'] = crearLinkMeet(rowObj['Paciente'], rowObj['Fecha'], rowObj['Hora']);
+    } catch (err) {
+      // Si falla la creación del evento (permisos, etc.), seguimos sin bloquear el guardado.
+      rowObj['Link Meet / Zoom'] = '';
+    }
+  }
   const sheet = getSheet(moduleKey);
   const headers = HEADERS[moduleKey];
   const rowValues = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
@@ -164,6 +213,13 @@ function addRow(moduleKey, rowObj) {
 }
 
 function updateRow(moduleKey, rowIndex, rowObj) {
+  if (moduleKey === 'teleconsultas' && !rowObj['Link Meet / Zoom']) {
+    try {
+      rowObj['Link Meet / Zoom'] = crearLinkMeet(rowObj['Paciente'], rowObj['Fecha'], rowObj['Hora']);
+    } catch (err) {
+      rowObj['Link Meet / Zoom'] = '';
+    }
+  }
   const sheet = getSheet(moduleKey);
   const headers = HEADERS[moduleKey];
   const rowValues = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');

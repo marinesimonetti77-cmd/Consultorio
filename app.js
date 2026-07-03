@@ -58,7 +58,7 @@ const FIELD_DEFS = {
   ],
   teleconsultas: [
     {k:'Paciente',t:'text',req:true},{k:'Fecha',t:'date'},{k:'Hora',t:'time'},
-    {k:'Link Meet / Zoom',t:'text',full:true},
+    {k:'Link Meet / Zoom',t:'text',full:true,hint:'Dejalo vacío para generar un link de Meet automáticamente'},
     {k:'Pagó',t:'select',opts:['Sí','No']},
     {k:'Receta enviada',t:'text'},{k:'Control programado',t:'date'},
     {k:'Link alternativo',t:'text'},{k:'Consentimiento',t:'select',opts:['Sí','No','Pendiente']},

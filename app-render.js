@@ -295,6 +295,7 @@ function formFieldHtml(f, value) {
     <div class="form-field${fullClass}">
       <label>${f.k}${f.req ? ' *' : ''}</label>
       ${inputHtml}
+      ${f.hint ? `<span style="font-size:11px;color:var(--text-faint);">${f.hint}</span>` : ''}
     </div>
   `;
 }
