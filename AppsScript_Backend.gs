@@ -16,6 +16,10 @@
 
 const SPREADSHEET_ID = '1gXeP_AGWLHLWERC_hdnOqkKblG2dbxRcKwefqIY4GZc';
 
+// Carpeta de Drive donde se guardan los adjuntos (PDF/imágenes). Se crea sola
+// la primera vez que se sube un archivo, dentro de "Mi unidad".
+const DRIVE_FOLDER_NAME = 'Consultorio Dr. Ciavarelli - Adjuntos';
+
 const SHEETS = {
   pacientes: '1-Pacientes',
   agenda: '2-Agenda',
@@ -29,12 +33,13 @@ const SHEETS = {
   estadisticas: '10-Estadísticas',
   cirugias: '11-Cirugías',
   informesQx: '12-Informes Qx',
-  facturacionQx: '13-Facturación Qx'
+  liquidaciones: '13-Liquidaciones',
+  facturacionQx: '14-Facturación Qx'
 };
 
 const HEADERS = {
   pacientes: ['Apellido','Nombre','Teléfono','Email','Obra Social / Prepaga','1ª Consulta','Último Control','Próximo Turno','Observaciones'],
-  agenda: ['Fecha','Hora','Paciente','Modalidad','Estado','Cobró','N° Factura','Observaciones','Link de pago'],
+  agenda: ['Fecha','Hora','Paciente','Teléfono','Modalidad','Estado','Cobró','N° Factura','Observaciones','Link de pago'],
   facturacion: ['Fecha','Paciente','N° Factura','Concepto','Importe ($)','IVA','Total ($)','Cobrado','Medio de Pago'],
   obrasSociales: ['Obra Social / Prepaga','Estado del Trámite','Usuario / RNOS','Clave','Vencimiento Credencial','Observaciones'],
   convenios: ['Financiador','Tipo de Convenio','Documentación presentada','Estado','Observaciones'],
@@ -43,8 +48,9 @@ const HEADERS = {
   reintegros: ['Paciente','Obra Social','N° Factura enviada','Fecha de envío','Estado','Observaciones'],
   checklist: ['Tarea','Vencimiento','Realizado','Observaciones','Categoria'],
   cirugias: ['N° CX','Fecha','Paciente','Institución','Tipo de cirugía','Diagnóstico','Modalidad','Obra Social','Ayudante','Anestesista','Instrumentadora','Estado','Link Drive','Observaciones'],
-  informesQx: ['N° CX','Fecha','Paciente','Tipo de cirugía','Descripción del procedimiento','Hallazgos intraoperatorios','Indicaciones postoperatorias','Estado del informe','Enviado a','Link PDF en Drive'],
-  facturacionQx: ['N° CX','Fecha','Paciente','Obra Social','Hon. Cirujano ($)','Hon. Ayudante ($)','Hon. Anestesista ($)','Total ($)','N° Factura','Fecha presentación','Fecha acreditación','Estado cobro','Observaciones','Link liquidación']
+  informesQx: ['N° CX','Fecha','Paciente','Tipo de cirugía','Descripción del procedimiento','Hallazgos intraoperatorios','Indicaciones postoperatorias','Estado del informe','Enviado a','Archivo adjunto'],
+  liquidaciones: ['N° CX','Fecha','Paciente','Obra Social / Financiador','Concepto','Importe ($)','Estado','Observaciones','Archivo adjunto'],
+  facturacionQx: ['N° CX','Fecha','Paciente','Obra Social','Hon. Cirujano ($)','Hon. Ayudante ($)','Hon. Anestesista ($)','Total ($)','N° Factura','Fecha presentación','Fecha acreditación','Estado cobro','Observaciones','Archivo adjunto']
 };
 
 function doGet(e) {
@@ -84,6 +90,14 @@ function doPost(e) {
       deleteRow(body.module, body.rowIndex);
       return jsonOut({ success: true });
     }
+    if (action === 'uploadFile') {
+      const link = subirArchivoADrive(body.fileName, body.mimeType, body.base64Data, body.module);
+      return jsonOut({ success: true, link: link });
+    }
+    if (action === 'sendReminderEmail') {
+      enviarRecordatorioMail(body.row);
+      return jsonOut({ success: true });
+    }
     return jsonOut({ error: 'Acción no reconocida' });
   } catch (err) {
     return jsonOut({ error: err.message });
@@ -98,11 +112,11 @@ function jsonOut(obj) {
 /**
  * Crea un evento de Calendar con videollamada de Google Meet asociada
  * y devuelve el link generado. Se usa para el módulo Teleconsultas.
+ * Usa la API avanzada de Calendar (Calendar v3) para forzar la creación
+ * de conferenceData, ya que CalendarApp.createEvent() no siempre genera
+ * el Hangout Link de forma confiable.
  */
 function crearLinkMeet(paciente, fechaStr, horaStr) {
-  const calendar = CalendarApp.getDefaultCalendar();
-
-  // Parsear fecha DD/MM/AAAA y hora HH:MM. Si faltan, usar ahora + 1 hora.
   let start = new Date();
   start.setMinutes(0, 0, 0);
   start.setHours(start.getHours() + 1);
@@ -110,7 +124,9 @@ function crearLinkMeet(paciente, fechaStr, horaStr) {
   if (fechaStr) {
     const parts = String(fechaStr).split('/');
     if (parts.length === 3) {
-      const [dd, mm, yyyy] = parts.map(p => parseInt(p, 10));
+      const dd = parseInt(parts[0], 10);
+      const mm = parseInt(parts[1], 10);
+      const yyyy = parseInt(parts[2], 10);
       let hh = 9, min = 0;
       if (horaStr) {
         const hParts = String(horaStr).split(':');
@@ -120,18 +136,28 @@ function crearLinkMeet(paciente, fechaStr, horaStr) {
       start = new Date(yyyy, mm - 1, dd, hh, min);
     }
   }
-  const end = new Date(start.getTime() + 30 * 60000); // 30 min de duración
+  const end = new Date(start.getTime() + 30 * 60000); // 30 min
 
-  const event = calendar.createEvent(
-    'Teleconsulta - ' + (paciente || 'Paciente'),
-    start,
-    end,
-    { description: 'Teleconsulta generada automáticamente desde el sistema del consultorio.' }
-  );
-  event.addPopupReminder(15);
+  const event = {
+    summary: 'Teleconsulta - ' + (paciente || 'Paciente'),
+    description: 'Teleconsulta generada automáticamente desde el sistema del consultorio.',
+    start: { dateTime: start.toISOString(), timeZone: Session.getScriptTimeZone() },
+    end: { dateTime: end.toISOString(), timeZone: Session.getScriptTimeZone() },
+    conferenceData: {
+      createRequest: {
+        requestId: Utilities.getUuid(),
+        conferenceSolutionKey: { type: 'hangoutsMeet' }
+      }
+    },
+    reminders: { useDefault: false, overrides: [{ method: 'popup', minutes: 15 }] }
+  };
 
-  const hangoutLink = event.getHangoutLink ? event.getHangoutLink() : null;
-  return hangoutLink || '';
+  const created = Calendar.Events.insert(event, 'primary', { conferenceDataVersion: 1 });
+  const link = created.hangoutLink || (created.conferenceData &&
+    created.conferenceData.entryPoints &&
+    created.conferenceData.entryPoints.length &&
+    created.conferenceData.entryPoints[0].uri) || '';
+  return link;
 }
 
 function getSheet(moduleKey) {
@@ -198,37 +224,165 @@ function getAllData() {
 }
 
 function addRow(moduleKey, rowObj) {
-  if (moduleKey === 'teleconsultas' && !rowObj['Link Meet / Zoom']) {
-    try {
-      rowObj['Link Meet / Zoom'] = crearLinkMeet(rowObj['Paciente'], rowObj['Fecha'], rowObj['Hora']);
-    } catch (err) {
-      // Si falla la creación del evento (permisos, etc.), seguimos sin bloquear el guardado.
-      rowObj['Link Meet / Zoom'] = '';
+  if (moduleKey === 'agenda') {
+    if (!rowObj['Teléfono']) {
+      rowObj['Teléfono'] = buscarDatoPaciente(rowObj['Paciente'], 'Teléfono');
     }
   }
+
   const sheet = getSheet(moduleKey);
   const headers = HEADERS[moduleKey];
   const rowValues = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
   sheet.appendRow(rowValues);
+
+  // Si se agenda un turno en modalidad Teleconsulta, crear automáticamente
+  // el registro correspondiente en el módulo Teleconsultas con el link de Meet.
+  if (moduleKey === 'agenda') {
+    let meetLink = '';
+    if (rowObj['Modalidad'] === 'Teleconsulta') {
+      meetLink = crearTeleconsultaDesdeAgenda(rowObj);
+    }
+    rowObj['__meetLink'] = meetLink;
+    enviarRecordatorioMail(rowObj);
+  }
 }
 
 function updateRow(moduleKey, rowIndex, rowObj) {
-  if (moduleKey === 'teleconsultas' && !rowObj['Link Meet / Zoom']) {
-    try {
-      rowObj['Link Meet / Zoom'] = crearLinkMeet(rowObj['Paciente'], rowObj['Fecha'], rowObj['Hora']);
-    } catch (err) {
-      rowObj['Link Meet / Zoom'] = '';
+  let modalidadCambioATele = false;
+  if (moduleKey === 'agenda') {
+    if (!rowObj['Teléfono']) {
+      rowObj['Teléfono'] = buscarDatoPaciente(rowObj['Paciente'], 'Teléfono');
+    }
+    if (rowObj['Modalidad'] === 'Teleconsulta') {
+      try {
+        const sheetCheck = getSheet('agenda');
+        const prevValues = sheetCheck.getRange(rowIndex, 1, 1, HEADERS['agenda'].length).getValues()[0];
+        const modalidadIdx = HEADERS['agenda'].indexOf('Modalidad');
+        const prevModalidad = prevValues[modalidadIdx];
+        if (prevModalidad !== 'Teleconsulta') modalidadCambioATele = true;
+      } catch (err) {
+        modalidadCambioATele = false;
+      }
     }
   }
+
   const sheet = getSheet(moduleKey);
   const headers = HEADERS[moduleKey];
   const rowValues = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
   sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
+
+  if (modalidadCambioATele) {
+    const meetLink = crearTeleconsultaDesdeAgenda(rowObj);
+    rowObj['__meetLink'] = meetLink;
+  }
+}
+
+/**
+ * A partir de una fila de Agenda (paciente, fecha, hora), genera el link
+ * de Meet y agrega automáticamente el registro correspondiente en el
+ * módulo Teleconsultas, listo para enviar al paciente.
+ */
+function crearTeleconsultaDesdeAgenda(agendaRow) {
+  let link = '';
+  try {
+    link = crearLinkMeet(agendaRow['Paciente'], agendaRow['Fecha'], agendaRow['Hora']);
+  } catch (err) {
+    link = '';
+  }
+
+  const teleRow = {
+    'Paciente': agendaRow['Paciente'] || '',
+    'Fecha': agendaRow['Fecha'] || '',
+    'Hora': agendaRow['Hora'] || '',
+    'Link Meet / Zoom': link,
+    'Pagó': agendaRow['Cobró'] === 'Sí' ? 'Sí' : 'No',
+    'Receta enviada': '',
+    'Control programado': '',
+    'Link alternativo': '',
+    'Consentimiento': 'Pendiente'
+  };
+
+  const sheet = getSheet('teleconsultas');
+  const headers = HEADERS['teleconsultas'];
+  const rowValues = headers.map(h => teleRow[h] !== undefined ? teleRow[h] : '');
+  sheet.appendRow(rowValues);
+  return link;
 }
 
 function deleteRow(moduleKey, rowIndex) {
   const sheet = getSheet(moduleKey);
   sheet.deleteRow(rowIndex);
+}
+
+/**
+ * Sube un archivo (PDF o imagen) recibido en base64 a una carpeta de Drive
+ * dedicada, organizada en subcarpetas por módulo, y devuelve el link para
+ * ver/descargar el archivo.
+ */
+function subirArchivoADrive(fileName, mimeType, base64Data, moduleKey) {
+  const rootFolder = getOrCreateFolder(DRIVE_FOLDER_NAME, DriveApp.getRootFolder());
+  const subFolderName = moduleKey || 'General';
+  const subFolder = getOrCreateFolder(subFolderName, rootFolder);
+
+  const bytes = Utilities.base64Decode(base64Data);
+  const blob = Utilities.newBlob(bytes, mimeType, fileName);
+  const file = subFolder.createFile(blob);
+  file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+  return file.getUrl();
+}
+
+function getOrCreateFolder(name, parent) {
+  const existing = parent.getFoldersByName(name);
+  if (existing.hasNext()) return existing.next();
+  return parent.createFolder(name);
+}
+
+/**
+ * Envía un mail de recordatorio de turno al paciente. Se dispara al
+ * agendar un turno en Agenda, si el paciente tiene email cargado.
+ */
+function enviarRecordatorioMail(agendaRow) {
+  const email = buscarDatoPaciente(agendaRow['Paciente'], 'Email');
+  if (!email) return;
+
+  const modalidad = agendaRow['Modalidad'] || 'Presencial';
+  const fecha = agendaRow['Fecha'] || '';
+  const hora = agendaRow['Hora'] || '';
+
+  let cuerpo = `Hola ${agendaRow['Paciente'] || ''},\n\n` +
+    `Le recordamos su turno con el Dr. Ciavarelli:\n\n` +
+    `Fecha: ${fecha}\nHora: ${hora}\nModalidad: ${modalidad}\n`;
+
+  if (modalidad === 'Teleconsulta' && agendaRow['__meetLink']) {
+    cuerpo += `\nLink de la videoconsulta: ${agendaRow['__meetLink']}\n`;
+  }
+  cuerpo += `\nAnte cualquier consulta, no dude en contactarnos.\n\nConsultorio Dr. Ciavarelli`;
+
+  try {
+    MailApp.sendEmail(email, 'Recordatorio de turno - Dr. Ciavarelli', cuerpo);
+  } catch (err) {
+    // Si falla el envío (email inválido, etc.) no bloquea el resto del flujo.
+  }
+}
+
+/**
+ * Busca un dato del paciente (Teléfono, Email, etc.) en la hoja de Pacientes
+ * a partir del nombre completo "Apellido, Nombre" o similar.
+ */
+function buscarDatoPaciente(nombrePaciente, campo) {
+  if (!nombrePaciente) return '';
+  try {
+    const data = getModuleData('pacientes');
+    const nombreNorm = String(nombrePaciente).trim().toLowerCase();
+    const match = data.rows.find(r => {
+      const full1 = `${r['Apellido']}, ${r['Nombre']}`.trim().toLowerCase();
+      const full2 = `${r['Nombre']} ${r['Apellido']}`.trim().toLowerCase();
+      return full1 === nombreNorm || full2 === nombreNorm || nombreNorm.indexOf((r['Apellido']||'').toLowerCase()) !== -1;
+    });
+    return match ? (match[campo] || '') : '';
+  } catch (err) {
+    return '';
+  }
 }
 
 function saveModuleData(moduleKey, rows) {

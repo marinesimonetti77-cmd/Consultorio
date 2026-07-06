@@ -16,7 +16,8 @@ const MODULES = [
   { key:'estadisticas', icon:'📊', label:'Estadísticas', num:'10' },
   { key:'cirugias', icon:'🔪', label:'Cirugías', num:'11' },
   { key:'informesQx', icon:'📝', label:'Informes Qx', num:'12' },
-  { key:'facturacionQx', icon:'💵', label:'Facturación Qx', num:'13' },
+  { key:'liquidaciones', icon:'📑', label:'Liquidaciones', num:'13' },
+  { key:'facturacionQx', icon:'💵', label:'Facturación Qx', num:'14' },
 ];
 
 const FIELD_DEFS = {
@@ -30,6 +31,7 @@ const FIELD_DEFS = {
   agenda: [
     {k:'Fecha',t:'date',req:true},{k:'Hora',t:'time',req:true},
     {k:'Paciente',t:'text',req:true},
+    {k:'Teléfono',t:'text',hint:'Se completa automático desde Pacientes si lo dejás vacío'},
     {k:'Modalidad',t:'select',opts:['Presencial','Teleconsulta']},
     {k:'Estado',t:'select',opts:['✔ Confirmado','✔ Atendido','✘ Canceló','⏳ Reprogramado','⏸ Ausente sin aviso']},
     {k:'Cobró',t:'select',opts:['Sí','No']},
@@ -98,7 +100,16 @@ const FIELD_DEFS = {
     {k:'Hallazgos intraoperatorios',t:'textarea',full:true},
     {k:'Indicaciones postoperatorias',t:'textarea',full:true},
     {k:'Estado del informe',t:'select',opts:['⏳ Pendiente','📝 Redactado','✔ Enviado']},
-    {k:'Enviado a',t:'text'},{k:'Link PDF en Drive',t:'text'},
+    {k:'Enviado a',t:'text'},
+    {k:'Archivo adjunto',t:'file',full:true},
+  ],
+  liquidaciones: [
+    {k:'N° CX',t:'text',req:true},{k:'Fecha',t:'date'},{k:'Paciente',t:'text',req:true},
+    {k:'Obra Social / Financiador',t:'text'},{k:'Concepto',t:'text',full:true},
+    {k:'Importe ($)',t:'number'},
+    {k:'Estado',t:'select',opts:['📋 Pendiente','⏳ En proceso','✔ Liquidado']},
+    {k:'Observaciones',t:'textarea',full:true},
+    {k:'Archivo adjunto',t:'file',full:true},
   ],
   facturacionQx: [
     {k:'N° CX',t:'text',req:true},{k:'Fecha',t:'date'},{k:'Paciente',t:'text',req:true},
@@ -108,7 +119,8 @@ const FIELD_DEFS = {
     {k:'N° Factura',t:'text'},{k:'Fecha presentación',t:'date'},
     {k:'Fecha acreditación',t:'date'},
     {k:'Estado cobro',t:'select',opts:['📋 Pendiente','⏳ En proceso','✔ Cobrado']},
-    {k:'Observaciones',t:'textarea',full:true},{k:'Link liquidación',t:'text'},
+    {k:'Observaciones',t:'textarea',full:true},
+    {k:'Archivo adjunto',t:'file',full:true},
   ],
 };
 

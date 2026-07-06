@@ -165,7 +165,7 @@ function tableHtml(key, fields, rows) {
         <tbody>
           ${rows.map((r, idx) => `
             <tr>
-              ${cols.map(c => `<td>${renderCellValue(c, r[c.k])}</td>`).join('')}
+              ${cols.map(c => `<td>${renderCellValue(c, r[c.k], key)}</td>`).join('')}
               <td class="cell-actions">
                 <button class="btn btn-sm btn-icon" data-edit="${idx}" title="Editar">✏️</button>
                 <button class="btn btn-sm btn-icon btn-danger" data-del="${idx}" title="Eliminar">🗑️</button>
@@ -179,9 +179,15 @@ function tableHtml(key, fields, rows) {
   `;
 }
 
-function renderCellValue(field, val) {
+function renderCellValue(field, val, moduleKey) {
   if (val === undefined || val === null || val === '') return '<span class="dim">—</span>';
   const s = String(val);
+  if (field.k === 'Teléfono' && moduleKey === 'agenda') {
+    const digits = s.replace(/[^0-9]/g, '');
+    if (!digits) return escapeHtml(s);
+    const waNumber = digits.startsWith('54') ? digits : ('54' + digits.replace(/^0/, ''));
+    return `<a href="https://wa.me/${waNumber}" target="_blank" class="pill pill-ok" title="Abrir chat de WhatsApp">💬 ${escapeHtml(s)}</a>`;
+  }
   if (s.startsWith('✔')) return `<span class="pill pill-ok">${escapeHtml(s)}</span>`;
   if (s.startsWith('✘')) return `<span class="pill pill-danger">${escapeHtml(s)}</span>`;
   if (s.startsWith('⏳')) return `<span class="pill pill-warn">${escapeHtml(s)}</span>`;
@@ -193,6 +199,9 @@ function renderCellValue(field, val) {
   if (field.t === 'number' && s !== '') {
     const n = parseFloat(s);
     if (!isNaN(n)) return `$${n.toLocaleString('es-AR')}`;
+  }
+  if (field.t === 'file' && s.startsWith('http')) {
+    return `<a href="${escapeHtml(s)}" target="_blank" class="pill pill-info">📎 Ver archivo</a>`;
   }
   return escapeHtml(s);
 }
@@ -240,6 +249,43 @@ function openRowModal(key, existingRow) {
   const close = () => { root.innerHTML = ''; };
   document.getElementById('rowClose').addEventListener('click', close);
   document.getElementById('rowCancel').addEventListener('click', close);
+
+  // Conectar inputs de tipo archivo: al elegir un archivo, subirlo a Drive
+  // y guardar el link resultante en el input oculto correspondiente.
+  fields.filter(f => f.t === 'file').forEach(f => {
+    const id = 'f_' + sanitizeId(f.k);
+    const fileInput = document.getElementById(id + '_input');
+    const statusEl = document.getElementById(id + '_status');
+    const hiddenInput = document.getElementById(id);
+    if (!fileInput) return;
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files[0];
+      if (!file) return;
+      if (file.size > 15 * 1024 * 1024) {
+        statusEl.textContent = 'El archivo supera 15MB, elegí uno más chico.';
+        statusEl.style.color = 'var(--danger)';
+        return;
+      }
+      statusEl.textContent = 'Subiendo archivo...';
+      statusEl.style.color = 'var(--text-dim)';
+      try {
+        const base64Data = await fileToBase64(file);
+        const res = await apiPost({
+          action: 'uploadFile',
+          fileName: file.name,
+          mimeType: file.type || 'application/octet-stream',
+          base64Data: base64Data,
+          module: key,
+        });
+        hiddenInput.value = res.link;
+        statusEl.innerHTML = `✅ Subido: <a href="${res.link}" target="_blank" style="color:var(--accent);">Ver archivo</a>`;
+      } catch (e) {
+        statusEl.textContent = 'Error al subir el archivo.';
+        statusEl.style.color = 'var(--danger)';
+      }
+    });
+  });
+
   document.getElementById('rowSave').addEventListener('click', async () => {
     const obj = {};
     let missingReq = false;
@@ -275,6 +321,15 @@ function sanitizeId(k) {
   return k.replace(/[^a-zA-Z0-9]/g, '_');
 }
 
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 function formFieldHtml(f, value) {
   const id = 'f_' + sanitizeId(f.k);
   const v = value !== undefined && value !== null ? value : '';
@@ -282,6 +337,16 @@ function formFieldHtml(f, value) {
   let inputHtml;
   if (f.t === 'textarea') {
     inputHtml = `<textarea id="${id}">${escapeHtml(v)}</textarea>`;
+  } else if (f.t === 'file') {
+    const hasFile = v && String(v).startsWith('http');
+    inputHtml = `
+      <input type="hidden" id="${id}" value="${escapeHtml(v)}">
+      <div id="${id}_wrap">
+        ${hasFile ? `<div style="margin-bottom:8px;"><a href="${escapeHtml(v)}" target="_blank" class="pill pill-info">📎 Ver archivo actual</a></div>` : ''}
+        <input type="file" id="${id}_input" accept="application/pdf,image/*">
+        <div id="${id}_status" style="font-size:11.5px;color:var(--text-dim);margin-top:6px;"></div>
+      </div>
+    `;
   } else if (f.t === 'select') {
     inputHtml = `<select id="${id}">
       ${f.opts.map(o => `<option value="${escapeHtml(o)}" ${o===v?'selected':''}>${o || '—'}</option>`).join('')}
