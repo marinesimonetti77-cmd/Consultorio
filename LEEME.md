@@ -39,6 +39,51 @@ Google Sheets (se convierte automáticamente, o usá "Archivo > Guardar como Goo
 3. Listo. A partir de ahí todo lo que cargues en la app se guarda directo en tu Google Sheet,
    y si editás el Sheet a mano, la app lo va a reflejar la próxima vez que entrés a ese módulo.
 
+## ⚠️ Paso extra si ya tenías el sistema instalado (arreglo del link de Meet)
+
+Si ya habías implementado una versión anterior del script y el link de Meet
+te quedaba vacío en Teleconsultas, es casi seguro que fue por esto: habilitaste
+el servicio avanzado de Calendar *después* de haber autorizado la app por
+primera vez, y ese permiso nuevo nunca se terminó de otorgar. Para destrabarlo:
+
+1. Pegá el `AppsScript_Backend.gs` actualizado (reemplazá todo el contenido).
+2. Guardá (Ctrl+S).
+3. En el desplegable de funciones (arriba, al lado de ▶ Ejecutar) elegí
+   **`testCalendarMeet`** y apretá ▶ **Ejecutar**.
+4. Te va a pedir autorización de nuevo — **revisá que en la lista de permisos
+   aparezca "Ver y editar eventos de Calendar"** y aceptalo.
+5. Mirá el resultado en **Ejecuciones** (panel izquierdo) o en **Ver → Registros
+   de ejecución**: ahí vas a ver el link generado, o el error exacto de Calendar
+   si algo sigue fallando.
+6. **Implementar → Nueva implementación** (obligatorio para que la app web
+   use el permiso ya otorgado).
+
+Con este arreglo, además, **el sistema nunca va a dejar el campo vacío**: si
+por algún motivo Calendar falla, se genera automáticamente un link de reunión
+instantánea de Meet (`meet.google.com/new`) como respaldo, así siempre tenés
+algo para mandarle al paciente.
+
+## Novedades de esta revisión
+
+- **Meet también se genera cargando la teleconsulta directo en su módulo**
+  (antes solo funcionaba si el turno venía de Agenda). Además, ahora hay un
+  botón 🎥 en la tabla de Teleconsultas para generar el link manualmente en
+  los registros viejos que quedaron sin uno.
+- **Visor de PDF/imagen integrado**: en Informes Qx, Liquidaciones y
+  Facturación Qx, el botón "📎 Ver archivo adjunto" abre el PDF o imagen
+  *dentro* de la app (en una ventana modal), sin salir a una pestaña nueva.
+  También podés abrirlo en pestaña nueva desde ese mismo modal si preferís.
+- **La columna "Archivo adjunto" ahora se ve siempre** en las tablas de
+  Liquidaciones y Facturación Qx (antes quedaba oculta por el límite de
+  columnas visibles).
+- **WhatsApp Web directo también en Pacientes** (antes solo estaba en Agenda):
+  el teléfono es un botón que abre `web.whatsapp.com` con el chat listo para
+  escribir, con un mensaje precargado (recordatorio de turno en Agenda,
+  saludo genérico en Pacientes). Vos das el último clic para mandarlo.
+- **Botón "✨ Cargar ejemplos"** en el panel lateral: agrega un registro de
+  muestra en cada uno de los 14 módulos para que veas el sistema funcionando
+  de punta a punta. Podés editar o borrar esos registros como cualquier otro.
+
 ## Notas importantes
 
 - **Cada vez que modifiques el script** (`AppsScript_Backend.gs`) tenés que hacer

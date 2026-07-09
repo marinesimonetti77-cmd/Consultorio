@@ -60,7 +60,7 @@ const FIELD_DEFS = {
   ],
   teleconsultas: [
     {k:'Paciente',t:'text',req:true},{k:'Fecha',t:'date'},{k:'Hora',t:'time'},
-    {k:'Link Meet / Zoom',t:'text',full:true,hint:'Dejalo vacío para generar un link de Meet automáticamente'},
+    {k:'Link Meet / Zoom',t:'text',full:true,hint:'Dejalo vacío: se genera un link de Meet automáticamente al guardar'},
     {k:'Pagó',t:'select',opts:['Sí','No']},
     {k:'Receta enviada',t:'text'},{k:'Control programado',t:'date'},
     {k:'Link alternativo',t:'text'},{k:'Consentimiento',t:'select',opts:['Sí','No','Pendiente']},
@@ -124,6 +124,97 @@ const FIELD_DEFS = {
   ],
 };
 
+/* ---------------- Datos de ejemplo ----------------
+   Un registro de muestra por módulo, para que se vea el sistema
+   operativo apenas te conectás. Se cargan con el botón "✨ Cargar
+   ejemplos" del panel lateral, usando el mismo mecanismo con el que
+   se guarda cualquier registro nuevo. Podés editarlos o borrarlos
+   como a cualquier otra fila. */
+const EXAMPLE_DATA = {
+  pacientes: {
+    'Apellido':'Pérez', 'Nombre':'Juan',
+    'Teléfono':'1122334455', 'Email':'juan.perez@example.com',
+    'Obra Social / Prepaga':'OSDE',
+    '1ª Consulta':'01/03/2026', 'Último Control':'15/06/2026',
+    'Próximo Turno':'20/07/2026',
+    'Observaciones':'Paciente de ejemplo — podés editarlo o eliminarlo.',
+  },
+  agenda: {
+    'Fecha':'20/07/2026', 'Hora':'10:00', 'Paciente':'Pérez, Juan',
+    'Teléfono':'1122334455', 'Modalidad':'Presencial',
+    'Estado':'✔ Confirmado', 'Cobró':'No', 'N° Factura':'', 'Link de pago':'',
+    'Observaciones':'Turno de ejemplo.',
+  },
+  facturacion: {
+    'Fecha':'15/06/2026', 'Paciente':'Pérez, Juan', 'N° Factura':'0001-00001234',
+    'Concepto':'Consulta', 'Importe ($)':15000, 'IVA':'', 'Total ($)':15000,
+    'Cobrado':'Sí', 'Medio de Pago':'Transferencia',
+  },
+  obrasSociales: {
+    'Obra Social / Prepaga':'OSDE', 'Estado del Trámite':'✔ Activo',
+    'Usuario / RNOS':'123456', 'Clave':'',
+    'Vencimiento Credencial':'31/12/2026',
+    'Observaciones':'Registro de ejemplo.',
+  },
+  convenios: {
+    'Financiador':'Swiss Medical', 'Tipo de Convenio':'Prestador directo',
+    'Documentación presentada':'Contrato firmado, constancia AFIP',
+    'Estado':'✔ Aprobado', 'Observaciones':'Registro de ejemplo.',
+  },
+  teleconsultas: {
+    'Paciente':'Pérez, Juan', 'Fecha':'22/07/2026', 'Hora':'16:00',
+    'Link Meet / Zoom':'', // se genera solo al guardar (ver Meet)
+    'Pagó':'No', 'Receta enviada':'', 'Control programado':'',
+    'Link alternativo':'', 'Consentimiento':'Pendiente',
+  },
+  cobros: {
+    'Fecha':'15/06/2026', 'Paciente':'Pérez, Juan',
+    'Transferencia ($)':15000, 'Mercado Pago ($)':0, 'Efectivo ($)':0,
+    'Pendiente ($)':0, 'N° Factura':'0001-00001234',
+  },
+  reintegros: {
+    'Paciente':'Pérez, Juan', 'Obra Social':'OSDE',
+    'N° Factura enviada':'0001-00001234', 'Fecha de envío':'16/06/2026',
+    'Estado':'⏳ En proceso', 'Observaciones':'Registro de ejemplo.',
+  },
+  checklist: {
+    'Tarea':'Renovar habilitación municipal (ejemplo)',
+    'Vencimiento':'31/12/2026', 'Realizado':'FALSE',
+    'Observaciones':'Tarea de ejemplo, podés marcarla como hecha.',
+  },
+  cirugias: {
+    'N° CX':'CX-0001', 'Fecha':'10/08/2026', 'Paciente':'Pérez, Juan',
+    'Institución':'Sanatorio Modelo', 'Tipo de cirugía':'Colecistectomía laparoscópica',
+    'Diagnóstico':'Litiasis vesicular', 'Modalidad':'Programada',
+    'Obra Social':'OSDE', 'Ayudante':'Dr. Gómez', 'Anestesista':'Dra. López',
+    'Instrumentadora':'Sra. Fernández', 'Estado':'⏳ Programada',
+    'Link Drive':'', 'Observaciones':'Cirugía de ejemplo.',
+  },
+  informesQx: {
+    'N° CX':'CX-0001', 'Fecha':'10/08/2026', 'Paciente':'Pérez, Juan',
+    'Tipo de cirugía':'Colecistectomía laparoscópica',
+    'Descripción del procedimiento':'Procedimiento de ejemplo — reemplazar por el informe real.',
+    'Hallazgos intraoperatorios':'Sin hallazgos relevantes (ejemplo).',
+    'Indicaciones postoperatorias':'Reposo relativo 48hs, control en 7 días (ejemplo).',
+    'Estado del informe':'📝 Redactado', 'Enviado a':'',
+    'Archivo adjunto':'', // subilo desde el formulario para ver el visor de PDF en acción
+  },
+  liquidaciones: {
+    'N° CX':'CX-0001', 'Fecha':'10/08/2026', 'Paciente':'Pérez, Juan',
+    'Obra Social / Financiador':'OSDE', 'Concepto':'Honorarios cirujano',
+    'Importe ($)':180000, 'Estado':'📋 Pendiente',
+    'Observaciones':'Registro de ejemplo.', 'Archivo adjunto':'',
+  },
+  facturacionQx: {
+    'N° CX':'CX-0001', 'Fecha':'10/08/2026', 'Paciente':'Pérez, Juan',
+    'Obra Social':'OSDE', 'Hon. Cirujano ($)':180000, 'Hon. Ayudante ($)':60000,
+    'Hon. Anestesista ($)':70000, 'Total ($)':310000, 'N° Factura':'0001-00001235',
+    'Fecha presentación':'12/08/2026', 'Fecha acreditación':'',
+    'Estado cobro':'📋 Pendiente', 'Observaciones':'Registro de ejemplo.',
+    'Archivo adjunto':'',
+  },
+};
+
 const state = {
   scriptUrl: localStorage.getItem('consultorio_script_url') || '',
   data: {},          // moduleKey -> {headers, rows}
@@ -178,6 +269,52 @@ function bindGlobalUI() {
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('mobileOverlay').classList.remove('open');
   });
+
+  // Botón "Cargar ejemplos": se inyecta arriba del botón de Configuración,
+  // sin necesidad de tocar index.html.
+  const footer = document.getElementById('sidebar-footer');
+  const cfgBtn = document.getElementById('config-btn');
+  const exBtn = document.createElement('button');
+  exBtn.id = 'loadExamplesBtn';
+  exBtn.className = 'btn';
+  exBtn.style.width = '100%';
+  exBtn.style.marginBottom = '8px';
+  exBtn.innerHTML = '✨ Cargar ejemplos';
+  footer.insertBefore(exBtn, cfgBtn);
+  exBtn.addEventListener('click', loadExampleData);
+}
+
+/* ---------------- Datos de ejemplo: carga ---------------- */
+async function loadExampleData() {
+  if (!state.scriptUrl) {
+    showToast('Conectá primero con Google Sheets desde ⚙ Configuración', true);
+    return;
+  }
+  const ok = confirm('Esto agrega UN registro de ejemplo en cada módulo de tu planilla, para que veas el sistema completo funcionando. Podés editarlos o borrarlos después. ¿Continuar?');
+  if (!ok) return;
+
+  const btn = document.getElementById('loadExamplesBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Cargando...'; }
+  showToast('Cargando ejemplos en cada módulo...');
+
+  const keys = Object.keys(EXAMPLE_DATA);
+  let okCount = 0, errCount = 0;
+  for (const key of keys) {
+    try {
+      await apiPost({ action: 'addRow', module: key, row: EXAMPLE_DATA[key] });
+      await refreshModule(key);
+      okCount++;
+    } catch (err) {
+      console.error('Error cargando ejemplo de', key, err);
+      errCount++;
+    }
+  }
+
+  if (btn) { btn.disabled = false; btn.innerHTML = '✨ Cargar ejemplos'; }
+  showToast(errCount === 0
+    ? `Listo: se cargaron ${okCount} ejemplos. Recorré los módulos para verlos.`
+    : `Se cargaron ${okCount} ejemplos, ${errCount} fallaron (revisá la consola del navegador).`, errCount > 0);
+  navigateTo(state.currentModule || 'inicio');
 }
 
 /* ---------------- Data loading / sync ---------------- */

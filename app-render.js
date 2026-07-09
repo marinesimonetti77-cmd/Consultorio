@@ -138,6 +138,31 @@ function renderTableModule(key) {
       } catch(e) {}
     });
   });
+
+  // Visor de PDF/imagen embebido (Informes Qx, Liquidaciones, Facturación Qx).
+  content.querySelectorAll('[data-viewfile]').forEach(btn => {
+    btn.addEventListener('click', () => openFileViewerModal(btn.dataset.viewfile));
+  });
+
+  // Generar (o regenerar) el link de Meet para una teleconsulta que quedó
+  // sin link — por ejemplo, filas viejas creadas antes de este arreglo.
+  content.querySelectorAll('[data-genmeet]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.genmeet, 10);
+      const row = rows[idx];
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      try {
+        await apiPost({ action:'generarMeet', module:key, rowIndex: row.__rowIndex, row: row });
+        await refreshModule(key);
+        renderTableModule(key);
+        showToast('Link de Meet generado');
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = '🎥';
+      }
+    });
+  });
 }
 
 function emptyStateHtml(key) {
@@ -153,20 +178,31 @@ function emptyStateHtml(key) {
 }
 
 function tableHtml(key, fields, rows) {
-  const cols = fields.filter(f => f.t !== 'textarea').slice(0, 7);
+  // El límite de 7 columnas es solo para no saturar la tabla, pero el
+  // campo "Archivo adjunto" (si existe en el módulo) SIEMPRE tiene que
+  // verse, aunque eso implique dejar afuera alguna otra columna. Antes
+  // se cortaba en Liquidaciones y Facturación Qx porque caía después
+  // de la columna 7.
+  const nonTextarea = fields.filter(f => f.t !== 'textarea');
+  const fileFields = nonTextarea.filter(f => f.t === 'file');
+  const otherFields = nonTextarea.filter(f => f.t !== 'file');
+  const maxOther = Math.max(1, 7 - fileFields.length);
+  const cols = otherFields.slice(0, maxOther).concat(fileFields);
+
   return `
     <div class="table-wrap">
       <div style="overflow-x:auto;">
       <table>
         <thead><tr>
           ${cols.map(c => `<th>${c.k}</th>`).join('')}
-          <th style="width:90px;">Acciones</th>
+          <th style="width:${key === 'teleconsultas' ? '130px' : '90px'};">Acciones</th>
         </tr></thead>
         <tbody>
           ${rows.map((r, idx) => `
             <tr>
-              ${cols.map(c => `<td>${renderCellValue(c, r[c.k], key)}</td>`).join('')}
+              ${cols.map(c => `<td>${renderCellValue(c, r[c.k], key, r)}</td>`).join('')}
               <td class="cell-actions">
+                ${key === 'teleconsultas' && !r['Link Meet / Zoom'] ? `<button class="btn btn-sm btn-icon" data-genmeet="${idx}" title="Generar link de Meet">🎥</button>` : ''}
                 <button class="btn btn-sm btn-icon" data-edit="${idx}" title="Editar">✏️</button>
                 <button class="btn btn-sm btn-icon btn-danger" data-del="${idx}" title="Eliminar">🗑️</button>
               </td>
@@ -179,14 +215,11 @@ function tableHtml(key, fields, rows) {
   `;
 }
 
-function renderCellValue(field, val, moduleKey) {
+function renderCellValue(field, val, moduleKey, row) {
   if (val === undefined || val === null || val === '') return '<span class="dim">—</span>';
   const s = String(val);
-  if (field.k === 'Teléfono' && moduleKey === 'agenda') {
-    const digits = s.replace(/[^0-9]/g, '');
-    if (!digits) return escapeHtml(s);
-    const waNumber = digits.startsWith('54') ? digits : ('54' + digits.replace(/^0/, ''));
-    return `<a href="https://wa.me/${waNumber}" target="_blank" class="pill pill-ok" title="Abrir chat de WhatsApp">💬 ${escapeHtml(s)}</a>`;
+  if (field.k === 'Teléfono' && (moduleKey === 'agenda' || moduleKey === 'pacientes')) {
+    return waPhonePill(s, moduleKey, row);
   }
   if (s.startsWith('✔')) return `<span class="pill pill-ok">${escapeHtml(s)}</span>`;
   if (s.startsWith('✘')) return `<span class="pill pill-danger">${escapeHtml(s)}</span>`;
@@ -201,9 +234,73 @@ function renderCellValue(field, val, moduleKey) {
     if (!isNaN(n)) return `$${n.toLocaleString('es-AR')}`;
   }
   if (field.t === 'file' && s.startsWith('http')) {
-    return `<a href="${escapeHtml(s)}" target="_blank" class="pill pill-info">📎 Ver archivo</a>`;
+    return `<button type="button" class="pill pill-info" data-viewfile="${escapeHtml(s)}" style="cursor:pointer;border:none;">📎 Ver archivo adjunto</button>`;
   }
   return escapeHtml(s);
+}
+
+/**
+ * Arma el botón de teléfono que abre WhatsApp Web directo (sin pasar por
+ * la pantalla intermedia de wa.me), con un mensaje precargado según el
+ * módulo (recordatorio de turno en Agenda, saludo genérico en Pacientes).
+ * Esto es un "abrir chat con este número", no un envío automático: el
+ * mensaje lo termina de mandar la persona con un clic.
+ */
+function waPhonePill(s, moduleKey, row) {
+  const digits = s.replace(/[^0-9]/g, '');
+  if (!digits) return escapeHtml(s);
+  const waNumber = digits.startsWith('54') ? digits : ('54' + digits.replace(/^0/, ''));
+
+  let text = 'Hola, te escribimos del consultorio del Dr. Ciavarelli.';
+  if (moduleKey === 'agenda' && row) {
+    const paciente = row['Paciente'] || '';
+    const fecha = row['Fecha'] || '';
+    const hora = row['Hora'] || '';
+    const modalidad = row['Modalidad'] || 'Presencial';
+    text = `Hola${paciente ? ' ' + paciente : ''}, te escribimos del consultorio del Dr. Ciavarelli para recordarte tu turno` +
+      (fecha ? ` del ${fecha}` : '') + (hora ? ` a las ${hora}` : '') + ` (${modalidad}).`;
+  } else if (moduleKey === 'pacientes' && row) {
+    const apellido = row['Apellido'] || '';
+    text = `Hola${apellido ? ' ' + apellido : ''}, te escribimos del consultorio del Dr. Ciavarelli.`;
+  }
+  const msg = encodeURIComponent(text);
+  return `<a href="https://web.whatsapp.com/send?phone=${waNumber}&text=${msg}" target="_blank" class="pill pill-ok" title="Abrir WhatsApp Web para escribirle">💬 ${escapeHtml(s)}</a>`;
+}
+
+/**
+ * Visor de PDF/imagen embebido en un modal, para no tener que salir de
+ * la app a ver el archivo adjunto. Convierte el link de Google Drive
+ * (.../file/d/ID/view) al formato de vista embebible (.../preview).
+ */
+function toDrivePreviewUrl(url) {
+  const m = url.match(/\/d\/([^/]+)/);
+  if (m) return `https://drive.google.com/file/d/${m[1]}/preview`;
+  return url;
+}
+
+function openFileViewerModal(url) {
+  const root = document.getElementById('modalRoot');
+  const embedUrl = toDrivePreviewUrl(url);
+  root.innerHTML = `
+    <div class="modal-overlay" id="fileOverlay">
+      <div class="modal" style="max-width:900px;">
+        <div class="modal-header">
+          <h3>📎 Ver archivo adjunto</h3>
+          <button class="modal-close" id="fileClose">✕</button>
+        </div>
+        <div class="modal-body" style="padding:0;">
+          <iframe src="${escapeHtml(embedUrl)}" style="width:100%;height:70vh;border:none;display:block;" allow="autoplay"></iframe>
+        </div>
+        <div class="modal-footer">
+          <a class="btn" href="${escapeHtml(url)}" target="_blank">Abrir en una pestaña nueva</a>
+          <button class="btn btn-primary" id="fileCloseBtn">Cerrar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const close = () => { root.innerHTML = ''; };
+  document.getElementById('fileClose').addEventListener('click', close);
+  document.getElementById('fileCloseBtn').addEventListener('click', close);
 }
 
 function filterRows(rows, term) {
@@ -250,6 +347,10 @@ function openRowModal(key, existingRow) {
   document.getElementById('rowClose').addEventListener('click', close);
   document.getElementById('rowCancel').addEventListener('click', close);
 
+  root.querySelectorAll('[data-viewfile]').forEach(btn => {
+    btn.addEventListener('click', () => openFileViewerModal(btn.dataset.viewfile));
+  });
+
   // Conectar inputs de tipo archivo: al elegir un archivo, subirlo a Drive
   // y guardar el link resultante en el input oculto correspondiente.
   fields.filter(f => f.t === 'file').forEach(f => {
@@ -278,7 +379,8 @@ function openRowModal(key, existingRow) {
           module: key,
         });
         hiddenInput.value = res.link;
-        statusEl.innerHTML = `✅ Subido: <a href="${res.link}" target="_blank" style="color:var(--accent);">Ver archivo</a>`;
+        statusEl.innerHTML = `✅ Subido: <button type="button" data-viewfile="${escapeHtml(res.link)}" style="background:none;border:none;color:var(--accent);cursor:pointer;text-decoration:underline;padding:0;font:inherit;">Ver archivo adjunto</button>`;
+        statusEl.querySelector('[data-viewfile]').addEventListener('click', (ev) => openFileViewerModal(ev.target.dataset.viewfile));
       } catch (e) {
         statusEl.textContent = 'Error al subir el archivo.';
         statusEl.style.color = 'var(--danger)';
@@ -342,7 +444,7 @@ function formFieldHtml(f, value) {
     inputHtml = `
       <input type="hidden" id="${id}" value="${escapeHtml(v)}">
       <div id="${id}_wrap">
-        ${hasFile ? `<div style="margin-bottom:8px;"><a href="${escapeHtml(v)}" target="_blank" class="pill pill-info">📎 Ver archivo actual</a></div>` : ''}
+        ${hasFile ? `<div style="margin-bottom:8px;"><button type="button" class="pill pill-info" data-viewfile="${escapeHtml(v)}" style="cursor:pointer;border:none;">📎 Ver archivo adjunto actual</button></div>` : ''}
         <input type="file" id="${id}_input" accept="application/pdf,image/*">
         <div id="${id}_status" style="font-size:11.5px;color:var(--text-dim);margin-top:6px;"></div>
       </div>

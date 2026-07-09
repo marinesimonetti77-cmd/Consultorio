@@ -98,6 +98,10 @@ function doPost(e) {
       enviarRecordatorioMail(body.row);
       return jsonOut({ success: true });
     }
+    if (action === 'generarMeet') {
+      const link = generarMeetParaFila(body.module, body.rowIndex, body.row);
+      return jsonOut({ success: true, link: link });
+    }
     return jsonOut({ error: 'Acción no reconocida' });
   } catch (err) {
     return jsonOut({ error: err.message });
@@ -158,6 +162,28 @@ function crearLinkMeet(paciente, fechaStr, horaStr) {
     created.conferenceData.entryPoints.length &&
     created.conferenceData.entryPoints[0].uri) || '';
   return link;
+}
+
+/**
+ * Envoltorio seguro de crearLinkMeet: si el servicio avanzado de Calendar
+ * falla por el motivo que sea (no habilitado, falta de autorización,
+ * cuota, etc.) NUNCA deja el campo vacío: registra el error en el log
+ * (Ver > Registros de ejecución en el editor de Apps Script, o Ejecuciones
+ * en el panel izquierdo) y devuelve un link de reunión instantánea de
+ * Meet como respaldo, que funciona siempre sin depender de ningún
+ * servicio adicional.
+ */
+function crearLinkMeetSeguro(paciente, fechaStr, horaStr) {
+  try {
+    const link = crearLinkMeet(paciente, fechaStr, horaStr);
+    if (link) return link;
+    console.error('crearLinkMeet devolvió un link vacío para: ' + paciente);
+  } catch (err) {
+    console.error('Error generando link de Meet para ' + paciente + ': ' + err.message);
+  }
+  // Respaldo: reunión instantánea de Meet. Se comparte igual que un link
+  // programado; al abrirla se crea la sala en el momento.
+  return 'https://meet.google.com/new';
 }
 
 function getSheet(moduleKey) {
@@ -230,6 +256,14 @@ function addRow(moduleKey, rowObj) {
     }
   }
 
+  // Teleconsultas cargadas DIRECTO en su propio módulo (no vía Agenda):
+  // si no se cargó un link, se genera automáticamente acá también.
+  if (moduleKey === 'teleconsultas') {
+    if (!rowObj['Link Meet / Zoom']) {
+      rowObj['Link Meet / Zoom'] = crearLinkMeetSeguro(rowObj['Paciente'], rowObj['Fecha'], rowObj['Hora']);
+    }
+  }
+
   const sheet = getSheet(moduleKey);
   const headers = HEADERS[moduleKey];
   const rowValues = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
@@ -266,6 +300,14 @@ function updateRow(moduleKey, rowIndex, rowObj) {
     }
   }
 
+  // Igual que en addRow: si es el módulo Teleconsultas y se guarda sin
+  // link, se genera automáticamente antes de escribir la fila.
+  if (moduleKey === 'teleconsultas') {
+    if (!rowObj['Link Meet / Zoom']) {
+      rowObj['Link Meet / Zoom'] = crearLinkMeetSeguro(rowObj['Paciente'], rowObj['Fecha'], rowObj['Hora']);
+    }
+  }
+
   const sheet = getSheet(moduleKey);
   const headers = HEADERS[moduleKey];
   const rowValues = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
@@ -278,17 +320,32 @@ function updateRow(moduleKey, rowIndex, rowObj) {
 }
 
 /**
+ * Genera (o regenera) el link de Meet para una fila puntual del módulo
+ * Teleconsultas y lo escribe directo en la celda correspondiente.
+ * La usa el botón "🎥 Generar link de Meet" de la tabla, para las filas
+ * que quedaron con el campo vacío.
+ */
+function generarMeetParaFila(moduleKey, rowIndex, rowObj) {
+  if (moduleKey !== 'teleconsultas') {
+    throw new Error('Esta acción solo está disponible para Teleconsultas.');
+  }
+  const link = crearLinkMeetSeguro(rowObj['Paciente'], rowObj['Fecha'], rowObj['Hora']);
+  const sheet = getSheet('teleconsultas');
+  const headers = HEADERS['teleconsultas'];
+  const colIdx = headers.indexOf('Link Meet / Zoom') + 1;
+  if (colIdx > 0 && rowIndex) {
+    sheet.getRange(rowIndex, colIdx).setValue(link);
+  }
+  return link;
+}
+
+/**
  * A partir de una fila de Agenda (paciente, fecha, hora), genera el link
  * de Meet y agrega automáticamente el registro correspondiente en el
  * módulo Teleconsultas, listo para enviar al paciente.
  */
 function crearTeleconsultaDesdeAgenda(agendaRow) {
-  let link = '';
-  try {
-    link = crearLinkMeet(agendaRow['Paciente'], agendaRow['Fecha'], agendaRow['Hora']);
-  } catch (err) {
-    link = '';
-  }
+  const link = crearLinkMeetSeguro(agendaRow['Paciente'], agendaRow['Fecha'], agendaRow['Hora']);
 
   const teleRow = {
     'Paciente': agendaRow['Paciente'] || '',
@@ -394,4 +451,22 @@ function saveModuleData(moduleKey, rows) {
     const values = rows.map(r => headers.map(h => r[h] !== undefined ? r[h] : ''));
     sheet.getRange(2, 1, values.length, headers.length).setValues(values);
   }
+}
+
+/**
+ * Función de DIAGNÓSTICO. Ejecutala manualmente desde el editor de Apps
+ * Script (seleccioná "testCalendarMeet" en el desplegable de funciones y
+ * apretá ▶ Ejecutar) para:
+ *  a) forzar el pedido de autorización del scope de Calendar si todavía
+ *     no se otorgó (esto es lo que suele romper el link cuando se habilitó
+ *     el servicio DESPUÉS de haber hecho la primera implementación), y
+ *  b) ver en los Registros de ejecución si el link se generó bien o
+ *     qué error concreto está devolviendo Calendar.
+ * Después de correrla una vez y aceptar los permisos, hacé de nuevo
+ * "Implementar > Nueva implementación" para que la app web use el permiso
+ * ya otorgado.
+ */
+function testCalendarMeet() {
+  const link = crearLinkMeetSeguro('Paciente de prueba', '', '');
+  Logger.log('Link generado: ' + link);
 }
