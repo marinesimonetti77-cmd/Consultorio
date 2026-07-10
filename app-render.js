@@ -182,6 +182,52 @@ function renderTableModule(key) {
       }
     });
   });
+
+  // Enviar el link de conexión de la teleconsulta, aparte del recordatorio
+  // — pensado para usar una vez que el paciente dio su conformidad y pagó.
+  content.querySelectorAll('[data-sendlink]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.sendlink, 10);
+      const row = rows[idx];
+      if (row['Consentimiento'] !== 'Sí' || row['Pagó'] !== 'Sí') {
+        const seguro = confirm('Esta teleconsulta todavía no figura con Consentimiento = "Sí" y Pagó = "Sí". ¿Mandar igual el link de conexión?');
+        if (!seguro) return;
+      }
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      try {
+        await apiPost({ action:'enviarLinkTeleconsulta', row: row });
+        showToast('Link de conexión enviado al paciente.');
+      } catch (e) {
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '📤';
+      }
+    });
+  });
+
+  // Generar el link de pago de Mercado Pago para un turno puntual.
+  content.querySelectorAll('[data-genpago]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.genpago, 10);
+      const row = rows[idx];
+      if (!row['Importe ($)'] || parseFloat(row['Importe ($)']) <= 0) {
+        showToast('Cargá un "Importe ($)" en el turno (editalo con ✏️) antes de generar el link de pago.', true);
+        return;
+      }
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      try {
+        await apiPost({ action:'generarLinkPago', rowIndex: row.__rowIndex, row: row });
+        await refreshModule(key);
+        renderTableModule(key);
+        showToast('Link de pago generado y guardado en el turno.');
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = '💳';
+      }
+    });
+  });
 }
 
 function emptyStateHtml(key) {
@@ -214,7 +260,7 @@ function tableHtml(key, fields, rows) {
       <table>
         <thead><tr>
           ${cols.map(c => `<th>${c.k}</th>`).join('')}
-          <th style="width:${(key === 'teleconsultas' || key === 'agenda') ? '130px' : '90px'};">Acciones</th>
+          <th style="width:${(key === 'teleconsultas' || key === 'agenda') ? '170px' : '90px'};">Acciones</th>
         </tr></thead>
         <tbody>
           ${rows.map((r, idx) => `
@@ -222,7 +268,9 @@ function tableHtml(key, fields, rows) {
               ${cols.map(c => `<td>${renderCellValue(c, r[c.k], key, r)}</td>`).join('')}
               <td class="cell-actions">
                 ${key === 'teleconsultas' && !r['Link Meet / Zoom'] ? `<button class="btn btn-sm btn-icon" data-genmeet="${idx}" title="Generar link de Meet">🎥</button>` : ''}
+                ${key === 'teleconsultas' && r['Link Meet / Zoom'] ? `<button class="btn btn-sm btn-icon" data-sendlink="${idx}" title="Enviar link de conexión al paciente (una vez confirmada la conformidad y el pago)">📤</button>` : ''}
                 ${key === 'agenda' ? `<button class="btn btn-sm btn-icon" data-remind="${idx}" title="Enviar recordatorio de turno por mail">📧</button>` : ''}
+                ${key === 'agenda' ? `<button class="btn btn-sm btn-icon" data-genpago="${idx}" title="Generar link de pago (Mercado Pago)">💳</button>` : ''}
                 <button class="btn btn-sm btn-icon" data-edit="${idx}" title="Editar">✏️</button>
                 <button class="btn btn-sm btn-icon btn-danger" data-del="${idx}" title="Eliminar">🗑️</button>
               </td>
