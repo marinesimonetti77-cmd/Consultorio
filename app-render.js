@@ -163,6 +163,25 @@ function renderTableModule(key) {
       }
     });
   });
+
+  // Enviar (o reenviar) el mail de recordatorio de turno a mano, como
+  // ejemplo o para pacientes que lo perdieron.
+  content.querySelectorAll('[data-remind]').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const idx = parseInt(btn.dataset.remind, 10);
+      const row = rows[idx];
+      btn.disabled = true;
+      btn.textContent = '⏳';
+      try {
+        await apiPost({ action:'sendReminderEmail', row: row });
+        showToast('Recordatorio enviado (si el paciente tiene email cargado en Pacientes).');
+      } catch (e) {
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '📧';
+      }
+    });
+  });
 }
 
 function emptyStateHtml(key) {
@@ -195,7 +214,7 @@ function tableHtml(key, fields, rows) {
       <table>
         <thead><tr>
           ${cols.map(c => `<th>${c.k}</th>`).join('')}
-          <th style="width:${key === 'teleconsultas' ? '130px' : '90px'};">Acciones</th>
+          <th style="width:${(key === 'teleconsultas' || key === 'agenda') ? '130px' : '90px'};">Acciones</th>
         </tr></thead>
         <tbody>
           ${rows.map((r, idx) => `
@@ -203,6 +222,7 @@ function tableHtml(key, fields, rows) {
               ${cols.map(c => `<td>${renderCellValue(c, r[c.k], key, r)}</td>`).join('')}
               <td class="cell-actions">
                 ${key === 'teleconsultas' && !r['Link Meet / Zoom'] ? `<button class="btn btn-sm btn-icon" data-genmeet="${idx}" title="Generar link de Meet">🎥</button>` : ''}
+                ${key === 'agenda' ? `<button class="btn btn-sm btn-icon" data-remind="${idx}" title="Enviar recordatorio de turno por mail">📧</button>` : ''}
                 <button class="btn btn-sm btn-icon" data-edit="${idx}" title="Editar">✏️</button>
                 <button class="btn btn-sm btn-icon btn-danger" data-del="${idx}" title="Eliminar">🗑️</button>
               </td>
@@ -271,9 +291,14 @@ function waPhonePill(s, moduleKey, row) {
 }
 
 /**
- * Arma el botón de email que abre el cliente de correo del paciente
- * directo (mailto:), con asunto y cuerpo precargados según el módulo.
+ * Arma el botón de email. Abre Gmail directo (no el mailto: genérico del
+ * sistema) con la cuenta del consultorio preseleccionada como remitente,
+ * y el asunto/cuerpo ya cargados. Para que efectivamente envíe desde
+ * consultorio.ciavarelli@gmail.com, el navegador tiene que tener esa
+ * cuenta de Google iniciada sesión (si no, Gmail va a pedir loguearse).
  */
+const CONSULTORIO_EMAIL = 'consultorio.ciavarelli@gmail.com';
+
 function emailPill(email, moduleKey, row) {
   let subject = 'Consultorio Dr. Ciavarelli';
   let body = 'Hola, te escribimos del consultorio del Dr. Ciavarelli.';
@@ -288,8 +313,10 @@ function emailPill(email, moduleKey, row) {
     const apellido = row['Apellido'] || '';
     body = `Hola${apellido ? ' ' + apellido : ''}, te escribimos del consultorio del Dr. Ciavarelli.`;
   }
-  const href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
-  return `<a href="${href}" class="pill pill-info" title="Enviar email">✉️ ${escapeHtml(email)}</a>`;
+  const href = `https://mail.google.com/mail/?view=cm&fs=1&tf=1&to=${encodeURIComponent(email)}` +
+    `&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}` +
+    `&authuser=${encodeURIComponent(CONSULTORIO_EMAIL)}`;
+  return `<a href="${href}" target="_blank" class="pill pill-info" title="Enviar email desde ${CONSULTORIO_EMAIL}">✉️ ${escapeHtml(email)}</a>`;
 }
 
 /**
