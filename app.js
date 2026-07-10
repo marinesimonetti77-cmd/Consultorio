@@ -39,6 +39,7 @@ const FIELD_DEFS = {
     {k:'Modalidad',t:'select',opts:['Presencial','Teleconsulta']},
     {k:'Estado',t:'select',opts:['✔ Confirmado','✔ Atendido','✘ Canceló','⏳ Reprogramado','⏸ Ausente sin aviso']},
     {k:'Cobró',t:'select',opts:['Sí','No']},
+    {k:'Importe ($)',t:'number',hint:'Necesario para generar el link de pago de Mercado Pago'},
     {k:'N° Factura',t:'text'},{k:'Link de pago',t:'text'},
     {k:'Observaciones',t:'textarea',full:true},
   ],
@@ -148,7 +149,7 @@ const EXAMPLE_DATA = {
   agenda: {
     'Fecha':'20/07/2026', 'Hora':'10:00', 'Paciente':'Pérez, Juan',
     'Teléfono':'1122334455', 'Email':'juan.perez@example.com', 'Modalidad':'Presencial',
-    'Estado':'✔ Confirmado', 'Cobró':'No', 'N° Factura':'', 'Link de pago':'',
+    'Estado':'✔ Confirmado', 'Cobró':'No', 'Importe ($)':15000, 'N° Factura':'', 'Link de pago':'',
     'Observaciones':'Turno de ejemplo.',
   },
   facturacion: {
@@ -288,6 +289,80 @@ function bindGlobalUI() {
   exBtn.innerHTML = '✨ Cargar ejemplos';
   footer.insertBefore(exBtn, cfgBtn);
   exBtn.addEventListener('click', loadExampleData);
+
+  // Botón "Mercado Pago": guarda el Public Key / Access Token de forma
+  // segura (Script Properties del lado del backend), para cuando esté
+  // listo el flujo de pago. Se puede cargar/actualizar en cualquier
+  // momento sin tocar código.
+  const mpBtn = document.createElement('button');
+  mpBtn.id = 'mpConfigBtn';
+  mpBtn.className = 'btn';
+  mpBtn.style.width = '100%';
+  mpBtn.style.marginBottom = '8px';
+  mpBtn.innerHTML = '💳 Mercado Pago';
+  footer.insertBefore(mpBtn, cfgBtn);
+  mpBtn.addEventListener('click', openMercadoPagoConfigModal);
+}
+
+/* ---------------- Mercado Pago: guardado de credenciales ---------------- */
+async function openMercadoPagoConfigModal() {
+  if (!state.scriptUrl) {
+    showToast('Conectá primero con Google Sheets desde ⚙ Configuración', true);
+    return;
+  }
+  let status = { publicKeyConfigured:false, accessTokenConfigured:false, publicKey:'' };
+  try {
+    const res = await fetch(state.scriptUrl + '?action=getConfigMP');
+    status = await res.json();
+  } catch (err) {
+    console.error(err);
+  }
+
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+    <div class="modal-overlay" id="mpOverlay">
+      <div class="modal">
+        <div class="modal-header">
+          <h3>💳 Credenciales de Mercado Pago</h3>
+          <button class="modal-close" id="mpClose">✕</button>
+        </div>
+        <div class="modal-body">
+          <div class="config-note">
+            Estas credenciales las conseguís en tu cuenta de Mercado Pago
+            (Tus integraciones → tu aplicación → Credenciales de producción).
+            Se guardan de forma segura del lado del servidor (no quedan
+            visibles en la web ni en el Sheet). Esto es solo el guardado de
+            las claves — el flujo de pago en sí todavía se está terminando
+            de definir.
+          </div>
+          <div class="form-field">
+            <label>Public Key ${status.publicKeyConfigured ? '✅ cargada' : ''}</label>
+            <input type="text" id="mpPublicKey" placeholder="APP_USR-xxxxxxxx-xxxx-xxxx..." value="${escapeHtml(status.publicKey || '')}">
+          </div>
+          <div class="form-field" style="margin-top:14px;">
+            <label>Access Token ${status.accessTokenConfigured ? '✅ cargado (oculto por seguridad)' : ''}</label>
+            <input type="password" id="mpAccessToken" placeholder="${status.accessTokenConfigured ? '••••••••  (dejalo así para no modificarlo)' : 'APP_USR-xxxxxxxxxxxxxxxx...'}" value="${status.accessTokenConfigured ? '••••••••' : ''}">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn" id="mpCancel">Cancelar</button>
+          <button class="btn-primary btn" id="mpSave">Guardar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const close = () => { root.innerHTML = ''; };
+  document.getElementById('mpClose').addEventListener('click', close);
+  document.getElementById('mpCancel').addEventListener('click', close);
+  document.getElementById('mpSave').addEventListener('click', async () => {
+    const publicKey = document.getElementById('mpPublicKey').value.trim();
+    const accessToken = document.getElementById('mpAccessToken').value.trim();
+    try {
+      await apiPost({ action:'guardarConfigMP', publicKey, accessToken });
+      showToast('Credenciales de Mercado Pago guardadas.');
+      close();
+    } catch (err) {}
+  });
 }
 
 /* ---------------- Datos de ejemplo: carga ---------------- */
