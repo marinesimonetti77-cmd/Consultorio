@@ -38,8 +38,8 @@ const SHEETS = {
 };
 
 const HEADERS = {
-  pacientes: ['Apellido','Nombre','Teléfono','Email','Obra Social / Prepaga','1ª Consulta','Último Control','Próximo Turno','Observaciones'],
-  agenda: ['Fecha','Hora','Paciente','Teléfono','Modalidad','Estado','Cobró','N° Factura','Observaciones','Link de pago'],
+  pacientes: ['Apellido','Nombre','Teléfono','Email','Obra Social / Prepaga','Plan','N° de Afiliado','Fecha de Nacimiento','Domicilio','1ª Consulta','Último Control','Próximo Turno','Observaciones'],
+  agenda: ['Fecha','Hora','Paciente','Teléfono','Email','Modalidad','Estado','Cobró','N° Factura','Observaciones','Link de pago'],
   facturacion: ['Fecha','Paciente','N° Factura','Concepto','Importe ($)','IVA','Total ($)','Cobrado','Medio de Pago'],
   obrasSociales: ['Obra Social / Prepaga','Estado del Trámite','Usuario / RNOS','Clave','Vencimiento Credencial','Observaciones'],
   convenios: ['Financiador','Tipo de Convenio','Documentación presentada','Estado','Observaciones'],
@@ -192,8 +192,18 @@ function getSheet(moduleKey) {
   if (!sheetName) throw new Error('Módulo desconocido: ' + moduleKey);
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
-    sheet = ss.insertSheet(sheetName);
-    sheet.appendRow(HEADERS[moduleKey]);
+    // El nombre exacto no matcheó (puede pasar si el texto con tildes se
+    // corrompió al copiar el script). Antes de crear una pestaña nueva
+    // (y duplicar datos), buscamos tolerando tildes/mayúsculas/errores de
+    // codificación por si la pestaña correcta ya existe con otro texto.
+    const target = normalizeKey(sheetName);
+    const match = ss.getSheets().find(sh => normalizeKey(sh.getName()) === target);
+    if (match) {
+      sheet = match;
+    } else {
+      sheet = ss.insertSheet(sheetName);
+      if (HEADERS[moduleKey]) sheet.appendRow(HEADERS[moduleKey]);
+    }
   }
   return sheet;
 }
@@ -229,12 +239,114 @@ function getModuleData(moduleKey) {
 function formatCell(val) {
   if (val instanceof Date) {
     const d = val;
+    // Las celdas que guardan SOLO una hora (sin fecha) quedan almacenadas
+    // por Google Sheets como "30/12/1899 + esa hora" (es el día cero de
+    // Sheets/Excel). Si detectamos exactamente ese día, es una hora pura:
+    // mostramos HH:MM en vez de la fecha completa.
+    if (d.getFullYear() === 1899 && d.getMonth() === 11 && d.getDate() === 30) {
+      const hh = ('0' + d.getHours()).slice(-2);
+      const min = ('0' + d.getMinutes()).slice(-2);
+      return hh + ':' + min;
+    }
     const dd = ('0' + d.getDate()).slice(-2);
     const mm = ('0' + (d.getMonth() + 1)).slice(-2);
     const yyyy = d.getFullYear();
     return dd + '/' + mm + '/' + yyyy;
   }
   return val;
+}
+
+/**
+ * Devuelve los encabezados TAL COMO están, literalmente, en la fila 1 de
+ * la hoja real (no el array fijo HEADERS de este script). Esto es clave:
+ * si tu Google Sheet (armada a partir del Excel original) tiene las
+ * columnas en un orden distinto al que este script asume, escribir por
+ * posición fija corre los datos a la columna equivocada. Buscando el
+ * nombre real de cada columna evitamos ese problema por completo, sin
+ * importar el orden en que estén.
+ * Si la hoja está recién creada (sin encabezados), escribe los de
+ * HEADERS[moduleKey] como fila 1 y los devuelve.
+ * ADEMÁS: si a la hoja le falta alguna columna que el módulo necesita
+ * (por ejemplo, "Teléfono" en Agenda), la agrega sola al final — así no
+ * hay que tocar la planilla a mano para que un campo empiece a guardarse.
+ */
+function getHeaderRow(sheet, moduleKey) {
+  const lastCol = sheet.getLastColumn();
+  let headers;
+  if (lastCol === 0) {
+    const defaults = HEADERS[moduleKey] || [];
+    if (defaults.length) sheet.appendRow(defaults);
+    return defaults;
+  }
+  const values = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+  headers = values.map(h => String(h).trim()).filter(h => h.length > 0);
+  if (headers.length === 0) headers = HEADERS[moduleKey] || [];
+
+  const expected = HEADERS[moduleKey] || [];
+  const faltantes = expected.filter(h => !headers.some(real => normalizeKey(real) === normalizeKey(h)));
+  if (faltantes.length > 0) {
+    const startCol = headers.length + 1;
+    sheet.getRange(1, startCol, 1, faltantes.length).setValues([faltantes]);
+    headers = headers.concat(faltantes);
+  }
+  return headers;
+}
+
+/**
+ * Revierte el error de codificación más común al copiar/pegar texto con
+ * tildes entre distintas apps ("mojibake"): un caracter como "é" termina
+ * guardado como "Ã©" porque sus bytes UTF-8 se reinterpretaron como
+ * Latin-1. Si detecta ese patrón, reconstruye el texto correcto.
+ */
+function looksMojibake(s) {
+  return /Ã.|Â./.test(s);
+}
+function fixMojibake(s) {
+  if (!looksMojibake(s)) return s;
+  try {
+    const codes = [];
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c > 255) return s; // no es el patrón típico, no tocar
+      codes.push(c);
+    }
+    return Utilities.newBlob(codes).getDataAsString('UTF-8');
+  } catch (e) {
+    return s;
+  }
+}
+
+/**
+ * Quita tildes, espacios extra y diferencias de mayúsculas/minúsculas, y
+ * corrige mojibake y la diferencia "N°" vs "Nº", para poder comparar
+ * nombres de columna de forma tolerante sin importar cómo haya quedado
+ * exactamente escrito el encabezado en tu hoja o en este script.
+ */
+function normalizeKey(s) {
+  const clean = fixMojibake(String(s || ''));
+  return clean
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[°º]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim().toLowerCase();
+}
+
+/**
+ * Arma el array de valores a escribir en una fila, respetando el orden
+ * REAL de columnas de la hoja (headers), buscando cada dato en rowObj
+ * primero por coincidencia exacta y, si no la encuentra, por coincidencia
+ * "tolerante" (sin tildes/mayúsculas/espacios). Esto es lo que evita que
+ * los campos queden corridos cuando el orden o el texto exacto de las
+ * columnas de tu hoja no coincide 100% con el de este script.
+ */
+function buildRowValues(headers, rowObj) {
+  const normalizedObj = {};
+  Object.keys(rowObj).forEach(k => { normalizedObj[normalizeKey(k)] = rowObj[k]; });
+  return headers.map(h => {
+    if (rowObj[h] !== undefined) return rowObj[h];
+    const viaNormalizado = normalizedObj[normalizeKey(h)];
+    return viaNormalizado !== undefined ? viaNormalizado : '';
+  });
 }
 
 function getAllData() {
@@ -254,6 +366,9 @@ function addRow(moduleKey, rowObj) {
     if (!rowObj['Teléfono']) {
       rowObj['Teléfono'] = buscarDatoPaciente(rowObj['Paciente'], 'Teléfono');
     }
+    if (!rowObj['Email']) {
+      rowObj['Email'] = buscarDatoPaciente(rowObj['Paciente'], 'Email');
+    }
   }
 
   // Teleconsultas cargadas DIRECTO en su propio módulo (no vía Agenda):
@@ -265,8 +380,8 @@ function addRow(moduleKey, rowObj) {
   }
 
   const sheet = getSheet(moduleKey);
-  const headers = HEADERS[moduleKey];
-  const rowValues = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
+  const headers = getHeaderRow(sheet, moduleKey);
+  const rowValues = buildRowValues(headers, rowObj);
   sheet.appendRow(rowValues);
 
   // Si se agenda un turno en modalidad Teleconsulta, crear automáticamente
@@ -287,12 +402,16 @@ function updateRow(moduleKey, rowIndex, rowObj) {
     if (!rowObj['Teléfono']) {
       rowObj['Teléfono'] = buscarDatoPaciente(rowObj['Paciente'], 'Teléfono');
     }
+    if (!rowObj['Email']) {
+      rowObj['Email'] = buscarDatoPaciente(rowObj['Paciente'], 'Email');
+    }
     if (rowObj['Modalidad'] === 'Teleconsulta') {
       try {
         const sheetCheck = getSheet('agenda');
-        const prevValues = sheetCheck.getRange(rowIndex, 1, 1, HEADERS['agenda'].length).getValues()[0];
-        const modalidadIdx = HEADERS['agenda'].indexOf('Modalidad');
-        const prevModalidad = prevValues[modalidadIdx];
+        const headersCheck = getHeaderRow(sheetCheck, 'agenda');
+        const prevValues = sheetCheck.getRange(rowIndex, 1, 1, headersCheck.length).getValues()[0];
+        const modalidadIdx = headersCheck.indexOf('Modalidad');
+        const prevModalidad = modalidadIdx >= 0 ? prevValues[modalidadIdx] : null;
         if (prevModalidad !== 'Teleconsulta') modalidadCambioATele = true;
       } catch (err) {
         modalidadCambioATele = false;
@@ -309,8 +428,8 @@ function updateRow(moduleKey, rowIndex, rowObj) {
   }
 
   const sheet = getSheet(moduleKey);
-  const headers = HEADERS[moduleKey];
-  const rowValues = headers.map(h => rowObj[h] !== undefined ? rowObj[h] : '');
+  const headers = getHeaderRow(sheet, moduleKey);
+  const rowValues = buildRowValues(headers, rowObj);
   sheet.getRange(rowIndex, 1, 1, rowValues.length).setValues([rowValues]);
 
   if (modalidadCambioATele) {
@@ -331,7 +450,7 @@ function generarMeetParaFila(moduleKey, rowIndex, rowObj) {
   }
   const link = crearLinkMeetSeguro(rowObj['Paciente'], rowObj['Fecha'], rowObj['Hora']);
   const sheet = getSheet('teleconsultas');
-  const headers = HEADERS['teleconsultas'];
+  const headers = getHeaderRow(sheet, 'teleconsultas');
   const colIdx = headers.indexOf('Link Meet / Zoom') + 1;
   if (colIdx > 0 && rowIndex) {
     sheet.getRange(rowIndex, colIdx).setValue(link);
@@ -360,8 +479,8 @@ function crearTeleconsultaDesdeAgenda(agendaRow) {
   };
 
   const sheet = getSheet('teleconsultas');
-  const headers = HEADERS['teleconsultas'];
-  const rowValues = headers.map(h => teleRow[h] !== undefined ? teleRow[h] : '');
+  const headers = getHeaderRow(sheet, 'teleconsultas');
+  const rowValues = buildRowValues(headers, teleRow);
   sheet.appendRow(rowValues);
   return link;
 }
@@ -469,4 +588,29 @@ function saveModuleData(moduleKey, rows) {
 function testCalendarMeet() {
   const link = crearLinkMeetSeguro('Paciente de prueba', '', '');
   Logger.log('Link generado: ' + link);
+}
+
+/**
+ * Función de DIAGNÓSTICO. Ejecutala manualmente (elegí "diagnosticarEncabezados"
+ * en el desplegable de funciones y apretá ▶ Ejecutar) para comparar, hoja por
+ * hoja, los encabezados que este script espera contra los que realmente tiene
+ * cada pestaña de tu Google Sheet. Mirá el resultado en Ver > Registros de
+ * ejecución. Si ves una columna marcada "❌ FALTA EN LA HOJA", esa columna
+ * no existe con ese nombre exacto en tu planilla y conviene agregarla o
+ * renombrarla para que coincida (o avisame el nombre real que tiene y lo
+ * ajusto en el script).
+ */
+function diagnosticarEncabezados() {
+  Object.keys(SHEETS).forEach(moduleKey => {
+    const sheet = getSheet(moduleKey);
+    const real = getHeaderRow(sheet, moduleKey);
+    const esperados = HEADERS[moduleKey] || [];
+    Logger.log('--- ' + SHEETS[moduleKey] + ' ---');
+    Logger.log('Orden real en la hoja: ' + real.join(' | '));
+    esperados.forEach(h => {
+      const encontrado = real.some(r => normalizeKey(r) === normalizeKey(h));
+      if (!encontrado) Logger.log('❌ FALTA EN LA HOJA: "' + h + '"');
+    });
+  });
+  Logger.log('Diagnóstico terminado. Revisá arriba si hay líneas "❌ FALTA".');
 }
