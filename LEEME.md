@@ -65,6 +65,85 @@ algo para mandarle al paciente.
 
 ## Novedades de esta revisión
 
+- **Flujo de pago con Mercado Pago (ya funcional, listo para cuando cargues
+  las claves):**
+  1. Cargás el turno en Agenda como siempre, con el campo nuevo
+     **"Importe ($)"**.
+  2. Botón **"💳 Generar link de pago"** en la fila del turno: crea un link
+     de pago real de Mercado Pago (Checkout Pro) y lo guarda en la columna
+     "Link de pago".
+  3. Se lo mandás al paciente a mano por WhatsApp o mail (con los accesos
+     directos que ya tenés en la tabla).
+  4. Cuando el paciente paga, **Mercado Pago avisa solo** a la web app
+     (webhook) y el sistema marca automáticamente "Cobró" = Sí y "Estado" =
+     "✔ Confirmado" en ese turno — no hace falta que hagas nada más.
+  - Esto **no incluye una página pública de reservas** (elegiste que
+    reservás vos/tu staff, no el paciente solo) — es exactamente el flujo:
+    cargás el turno → generás el link → lo mandás → se cobra solo.
+  - Para que funcione necesitás cargar el **Access Token** en el botón
+    "💳 Mercado Pago" (ver más abajo). Sin eso, el botón de generar el link
+    va a avisarte con un error claro pidiéndolo.
+- **Teleconsulta: conformidad primero, link aparte.** El recordatorio de
+  turno para teleconsultas ya NO manda el link de Meet. En cambio, incluye
+  el texto de conformidad ("al optar por la modalidad de teleconsulta,
+  presta su conformidad...") y avisa que el link llega en un mensaje
+  aparte. En la tabla de Teleconsultas, cuando ya existe el link generado,
+  aparece el botón **"📤 Enviar link"** para mandarlo manualmente una vez
+  que confirmaste a mano que el paciente dio conformidad y pagó (columnas
+  Consentimiento / Pagó). Cuando estén los pagos automáticos de Mercado
+  Pago, esto se puede disparar solo.
+- **Botón "💳 Mercado Pago"** en el panel lateral: para cargar el Public Key
+  y el Access Token de tu cuenta de Mercado Pago apenas los tengas. Se
+  guardan de forma segura en el servidor (Script Properties de Apps
+  Script) — nunca quedan expuestos en la web ni en el Sheet, y no hace
+  falta tocar código para cargarlos o cambiarlos. **Importante:** esto es
+  solo el guardado de las credenciales. El flujo de pago en sí (generar el
+  link de pago por turno, recibir la confirmación de Mercado Pago y
+  marcar el turno como pagado) todavía no está construido — lo armamos en
+  un paso aparte una vez que definamos cómo va a reservar/pagar el
+  paciente (ver más abajo).
+- **Mail desde consultorio.ciavarelli@gmail.com**: los botones de email ahora
+  abren Gmail directo (no el "mailto" genérico del sistema) con esa cuenta
+  preseleccionada. Para que funcione, el navegador tiene que tener esa
+  cuenta de Google logueada. El recordatorio automático de turno también
+  intenta salir desde esa dirección — **pero para que realmente salga desde
+  ahí (y no solo con ese nombre) esa casilla tiene que estar agregada como
+  "Enviar correo como" en Gmail** (Configuración > Cuentas y otras
+  configuraciones de esa opción) de la cuenta que ejecuta el script, o el
+  script implementado directamente con "Ejecutar como" esa cuenta.
+- **Auto-completado de teléfono/email en Agenda más flexible**: antes exigía
+  que escribieras el nombre del paciente exactamente igual (con tildes y
+  mayúsculas) a como está en Pacientes. Ahora ignora tildes/mayúsculas al
+  buscar la coincidencia.
+- **Botón "📧 Enviar recordatorio"** en cada fila de Agenda, para mandar (o
+  volver a mandar) el mail de recordatorio de turno a mano, además del
+  envío automático que ya pasa al cargar el turno.
+- **Pacientes: campos nuevos** — Plan, N° de Afiliado, Fecha de Nacimiento y
+  Domicilio, además de los que ya había. Se agregan solos a tu Sheet la
+  próxima vez que guardes un paciente (no hace falta tocar la planilla).
+- **Acceso directo a email** (además del de WhatsApp que ya había): en
+  Pacientes y en Agenda, el email es un botón que abre tu programa de correo
+  con el mensaje precargado (recordatorio de turno en Agenda).
+- **Agenda ahora también autocompleta el Email** del paciente (antes solo
+  autocompletaba el Teléfono), y en la tabla de Agenda ya se ven los accesos
+  directos de WhatsApp y de email juntos.
+- **Fix importante — campos "corridos" / datos que no se guardaban**: el
+  script escribía cada dato en una posición de columna fija, asumiendo que
+  el orden de columnas de tu Google Sheet coincidía exactamente con el del
+  script. Si tu planilla (armada desde tu Excel original) tenía las columnas
+  en otro orden, los valores se guardaban en la columna equivocada — esto
+  explicaba el teléfono que no aparecía en Agenda, el "Archivo adjunto"
+  vacío en Informes Qx, y el link de Meet que no se veía. Ahora cada valor
+  se busca y se escribe por el **nombre real** de la columna en tu hoja, sin
+  importar el orden ni pequeñas diferencias de tildes/mayúsculas/espacios.
+- **Nueva función de diagnóstico `diagnosticarEncabezados`**: corré esta
+  función manualmente desde el editor de Apps Script (Ver > Registros de
+  ejecución para ver el resultado) para comparar los encabezados reales de
+  cada hoja contra los que espera el script, y detectar si falta alguna
+  columna con ese nombre exacto.
+- **Fix de "30/12/1899" en el campo Hora**: era un artefacto de cómo Google
+  Sheets guarda valores de solo-hora (sin fecha). Ahora se muestra
+  correctamente como HH:MM.
 - **Meet también se genera cargando la teleconsulta directo en su módulo**
   (antes solo funcionaba si el turno venía de Agenda). Además, ahora hay un
   botón 🎥 en la tabla de Teleconsultas para generar el link manualmente en
