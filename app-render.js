@@ -186,7 +186,7 @@ function tableHtml(key, fields, rows) {
   const nonTextarea = fields.filter(f => f.t !== 'textarea');
   const fileFields = nonTextarea.filter(f => f.t === 'file');
   const otherFields = nonTextarea.filter(f => f.t !== 'file');
-  const maxOther = Math.max(1, 7 - fileFields.length);
+  const maxOther = Math.max(1, 8 - fileFields.length);
   const cols = otherFields.slice(0, maxOther).concat(fileFields);
 
   return `
@@ -220,6 +220,9 @@ function renderCellValue(field, val, moduleKey, row) {
   const s = String(val);
   if (field.k === 'Teléfono' && (moduleKey === 'agenda' || moduleKey === 'pacientes')) {
     return waPhonePill(s, moduleKey, row);
+  }
+  if (field.k === 'Email' && (moduleKey === 'agenda' || moduleKey === 'pacientes') && s.indexOf('@') !== -1) {
+    return emailPill(s, moduleKey, row);
   }
   if (s.startsWith('✔')) return `<span class="pill pill-ok">${escapeHtml(s)}</span>`;
   if (s.startsWith('✘')) return `<span class="pill pill-danger">${escapeHtml(s)}</span>`;
@@ -265,6 +268,28 @@ function waPhonePill(s, moduleKey, row) {
   }
   const msg = encodeURIComponent(text);
   return `<a href="https://web.whatsapp.com/send?phone=${waNumber}&text=${msg}" target="_blank" class="pill pill-ok" title="Abrir WhatsApp Web para escribirle">💬 ${escapeHtml(s)}</a>`;
+}
+
+/**
+ * Arma el botón de email que abre el cliente de correo del paciente
+ * directo (mailto:), con asunto y cuerpo precargados según el módulo.
+ */
+function emailPill(email, moduleKey, row) {
+  let subject = 'Consultorio Dr. Ciavarelli';
+  let body = 'Hola, te escribimos del consultorio del Dr. Ciavarelli.';
+  if (moduleKey === 'agenda' && row) {
+    const paciente = row['Paciente'] || '';
+    const fecha = row['Fecha'] || '';
+    const hora = row['Hora'] || '';
+    subject = 'Recordatorio de turno - Dr. Ciavarelli';
+    body = `Hola${paciente ? ' ' + paciente : ''}, te recordamos tu turno` +
+      (fecha ? ` del ${fecha}` : '') + (hora ? ` a las ${hora}` : '') + '.';
+  } else if (moduleKey === 'pacientes' && row) {
+    const apellido = row['Apellido'] || '';
+    body = `Hola${apellido ? ' ' + apellido : ''}, te escribimos del consultorio del Dr. Ciavarelli.`;
+  }
+  const href = `mailto:${email}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  return `<a href="${href}" class="pill pill-info" title="Enviar email">✉️ ${escapeHtml(email)}</a>`;
 }
 
 /**
