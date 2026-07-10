@@ -192,8 +192,18 @@ function getSheet(moduleKey) {
   if (!sheetName) throw new Error('Módulo desconocido: ' + moduleKey);
   let sheet = ss.getSheetByName(sheetName);
   if (!sheet) {
-    sheet = ss.insertSheet(sheetName);
-    sheet.appendRow(HEADERS[moduleKey]);
+    // El nombre exacto no matcheó (puede pasar si el texto con tildes se
+    // corrompió al copiar el script). Antes de crear una pestaña nueva
+    // (y duplicar datos), buscamos tolerando tildes/mayúsculas/errores de
+    // codificación por si la pestaña correcta ya existe con otro texto.
+    const target = normalizeKey(sheetName);
+    const match = ss.getSheets().find(sh => normalizeKey(sh.getName()) === target);
+    if (match) {
+      sheet = match;
+    } else {
+      sheet = ss.insertSheet(sheetName);
+      if (HEADERS[moduleKey]) sheet.appendRow(HEADERS[moduleKey]);
+    }
   }
   return sheet;
 }
@@ -256,28 +266,68 @@ function formatCell(val) {
  * importar el orden en que estén.
  * Si la hoja está recién creada (sin encabezados), escribe los de
  * HEADERS[moduleKey] como fila 1 y los devuelve.
+ * ADEMÁS: si a la hoja le falta alguna columna que el módulo necesita
+ * (por ejemplo, "Teléfono" en Agenda), la agrega sola al final — así no
+ * hay que tocar la planilla a mano para que un campo empiece a guardarse.
  */
 function getHeaderRow(sheet, moduleKey) {
   const lastCol = sheet.getLastColumn();
+  let headers;
   if (lastCol === 0) {
     const defaults = HEADERS[moduleKey] || [];
     if (defaults.length) sheet.appendRow(defaults);
     return defaults;
   }
   const values = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-  const headers = values.map(h => String(h).trim()).filter(h => h.length > 0);
-  return headers.length > 0 ? headers : (HEADERS[moduleKey] || []);
+  headers = values.map(h => String(h).trim()).filter(h => h.length > 0);
+  if (headers.length === 0) headers = HEADERS[moduleKey] || [];
+
+  const expected = HEADERS[moduleKey] || [];
+  const faltantes = expected.filter(h => !headers.some(real => normalizeKey(real) === normalizeKey(h)));
+  if (faltantes.length > 0) {
+    const startCol = headers.length + 1;
+    sheet.getRange(1, startCol, 1, faltantes.length).setValues([faltantes]);
+    headers = headers.concat(faltantes);
+  }
+  return headers;
 }
 
 /**
- * Quita tildes, espacios extra y diferencias de mayúsculas/minúsculas,
- * para poder comparar nombres de columna de forma tolerante (por si el
- * encabezado real de tu hoja tiene una tilde distinta o un espacio de
- * más respecto del texto que usa este script).
+ * Revierte el error de codificación más común al copiar/pegar texto con
+ * tildes entre distintas apps ("mojibake"): un caracter como "é" termina
+ * guardado como "Ã©" porque sus bytes UTF-8 se reinterpretaron como
+ * Latin-1. Si detecta ese patrón, reconstruye el texto correcto.
+ */
+function looksMojibake(s) {
+  return /Ã.|Â./.test(s);
+}
+function fixMojibake(s) {
+  if (!looksMojibake(s)) return s;
+  try {
+    const codes = [];
+    for (let i = 0; i < s.length; i++) {
+      const c = s.charCodeAt(i);
+      if (c > 255) return s; // no es el patrón típico, no tocar
+      codes.push(c);
+    }
+    return Utilities.newBlob(codes).getDataAsString('UTF-8');
+  } catch (e) {
+    return s;
+  }
+}
+
+/**
+ * Quita tildes, espacios extra y diferencias de mayúsculas/minúsculas, y
+ * corrige mojibake y la diferencia "N°" vs "Nº", para poder comparar
+ * nombres de columna de forma tolerante sin importar cómo haya quedado
+ * exactamente escrito el encabezado en tu hoja o en este script.
  */
 function normalizeKey(s) {
-  return String(s || '')
+  const clean = fixMojibake(String(s || ''));
+  return clean
     .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[°º]/g, '')
+    .replace(/\s+/g, ' ')
     .trim().toLowerCase();
 }
 
