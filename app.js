@@ -224,6 +224,7 @@ const EXAMPLE_DATA = {
 
 const state = {
   scriptUrl: localStorage.getItem('consultorio_script_url') || '',
+  clave: localStorage.getItem('consultorio_clave') || '',
   data: {},          // moduleKey -> {headers, rows}
   currentModule: 'inicio',
   syncStatus: 'idle', // idle | pending | ok | err
@@ -242,10 +243,10 @@ async function init() {
     openConfigModal(true);
     updateSyncUI('idle');
   } else {
-    await loadAllData();
+    const ok = await loadAllData();
     document.getElementById('loading-screen').style.display = 'none';
     document.getElementById('app').style.display = 'flex';
-    navigateTo('inicio');
+    if (ok) navigateTo('inicio');
   }
 }
 
@@ -302,6 +303,23 @@ function bindGlobalUI() {
   mpBtn.innerHTML = '💳 Mercado Pago';
   footer.insertBefore(mpBtn, cfgBtn);
   mpBtn.addEventListener('click', openMercadoPagoConfigModal);
+
+  // Botón "Cerrar sesión": borra la clave guardada en este navegador (no
+  // la clave en sí, que sigue viva en el servidor) y pide volver a
+  // ingresarla.
+  const logoutBtn = document.createElement('button');
+  logoutBtn.id = 'logoutBtn';
+  logoutBtn.className = 'btn';
+  logoutBtn.style.width = '100%';
+  logoutBtn.style.marginBottom = '8px';
+  logoutBtn.innerHTML = '🔒 Cerrar sesión';
+  footer.insertBefore(logoutBtn, cfgBtn);
+  logoutBtn.addEventListener('click', () => {
+    if (!confirm('¿Cerrar sesión? Vas a tener que ingresar la clave de nuevo la próxima vez.')) return;
+    localStorage.removeItem('consultorio_clave');
+    state.clave = '';
+    location.reload();
+  });
 }
 
 /* ---------------- Mercado Pago: guardado de credenciales ---------------- */
@@ -312,7 +330,7 @@ async function openMercadoPagoConfigModal() {
   }
   let status = { publicKeyConfigured:false, accessTokenConfigured:false, publicKey:'' };
   try {
-    const res = await fetch(state.scriptUrl + '?action=getConfigMP');
+    const res = await fetch(state.scriptUrl + '?action=getConfigMP&clave=' + encodeURIComponent(state.clave));
     status = await res.json();
   } catch (err) {
     console.error(err);
@@ -402,35 +420,106 @@ async function loadExampleData() {
 async function loadAllData() {
   updateSyncUI('pending');
   try {
-    const res = await fetch(state.scriptUrl + '?action=getAll');
+    const res = await fetch(state.scriptUrl + '?action=getAll&clave=' + encodeURIComponent(state.clave));
     const json = await res.json();
+    if (json.unauthorized) {
+      updateSyncUI('idle');
+      openLoginModal();
+      return false;
+    }
     if (json.error) throw new Error(json.error);
     state.data = json;
     updateSyncUI('ok');
+    return true;
   } catch (err) {
     console.error(err);
     updateSyncUI('err');
     showToast('No se pudo conectar con Google Sheets. Revisá la configuración.', true);
+    return false;
   }
 }
 
 async function apiPost(body) {
   updateSyncUI('pending');
   try {
+    const payload = Object.assign({}, body, { clave: state.clave });
     const res = await fetch(state.scriptUrl, {
       method: 'POST',
-      body: JSON.stringify(body),
+      body: JSON.stringify(payload),
     });
     const json = await res.json();
+    if (json.unauthorized) {
+      updateSyncUI('idle');
+      openLoginModal();
+      throw new Error('unauthorized-handled');
+    }
     if (json.error) throw new Error(json.error);
     updateSyncUI('ok');
     return json;
   } catch (err) {
-    console.error(err);
     updateSyncUI('err');
-    showToast('Error al guardar: ' + err.message, true);
+    if (err.message !== 'unauthorized-handled') {
+      console.error(err);
+      showToast('Error al guardar: ' + err.message, true);
+    }
     throw err;
   }
+}
+
+/* ---------------- Login (clave de acceso) ---------------- */
+function openLoginModal() {
+  const root = document.getElementById('modalRoot');
+  root.innerHTML = `
+    <div class="modal-overlay" id="loginOverlay">
+      <div class="modal" style="max-width:380px;">
+        <div class="modal-header">
+          <h3>🔒 Ingresar</h3>
+        </div>
+        <div class="modal-body">
+          <div class="form-field">
+            <label>Clave de acceso del consultorio</label>
+            <input type="password" id="loginClave" placeholder="Ingresá la clave">
+          </div>
+          <div id="loginError" style="color:var(--danger);font-size:12px;margin-top:8px;"></div>
+        </div>
+        <div class="modal-footer" style="justify-content:stretch;">
+          <button class="btn-primary btn" id="loginBtn" style="width:100%;">Ingresar</button>
+        </div>
+      </div>
+    </div>
+  `;
+  const tryLogin = async () => {
+    const clave = document.getElementById('loginClave').value;
+    const errEl = document.getElementById('loginError');
+    errEl.textContent = '';
+    try {
+      const res = await fetch(state.scriptUrl, {
+        method: 'POST',
+        body: JSON.stringify({ action: 'login', clave }),
+      });
+      const json = await res.json();
+      if (json.success) {
+        state.clave = clave;
+        localStorage.setItem('consultorio_clave', clave);
+        root.innerHTML = '';
+        document.getElementById('loading-screen').style.display = 'flex';
+        document.getElementById('app').style.display = 'none';
+        const ok = await loadAllData();
+        document.getElementById('loading-screen').style.display = 'none';
+        document.getElementById('app').style.display = 'flex';
+        if (ok) navigateTo(state.currentModule || 'inicio');
+      } else {
+        errEl.textContent = json.error || 'Clave incorrecta.';
+      }
+    } catch (err) {
+      errEl.textContent = 'Error de conexión. Probá de nuevo.';
+    }
+  };
+  document.getElementById('loginBtn').addEventListener('click', tryLogin);
+  document.getElementById('loginClave').addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') tryLogin();
+  });
+  document.getElementById('loginClave').focus();
 }
 
 function updateSyncUI(status) {
@@ -457,8 +546,9 @@ function navigateTo(moduleKey) {
 
 async function refreshModule(moduleKey) {
   try {
-    const res = await fetch(state.scriptUrl + '?action=get&module=' + moduleKey);
+    const res = await fetch(state.scriptUrl + '?action=get&module=' + moduleKey + '&clave=' + encodeURIComponent(state.clave));
     const json = await res.json();
+    if (json.unauthorized) { openLoginModal(); return; }
     if (json.error) throw new Error(json.error);
     state.data[moduleKey] = json;
   } catch (err) {
