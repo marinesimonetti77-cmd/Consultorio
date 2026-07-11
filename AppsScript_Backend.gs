@@ -62,11 +62,15 @@ const HEADERS = {
 function doGet(e) {
   try {
     // Webhook de Mercado Pago: cuando un pago se aprueba, MP llama a esta
-    // misma URL con parámetros propios (no manda "action"). Lo detectamos
-    // así y confirmamos el turno correspondiente automáticamente.
+    // misma URL con parámetros propios (no manda "action" ni la clave de
+    // acceso). Se atiende ANTES de pedir la clave, porque MP no la tiene.
     if (e.parameter.type === 'payment' || e.parameter.topic === 'payment') {
       return manejarWebhookMercadoPago(e);
     }
+
+    const noAutorizado = chequearClave(e.parameter.clave);
+    if (noAutorizado) return noAutorizado;
+
     const action = e.parameter.action || 'getAll';
     if (action === 'getAll') {
       return jsonOut(getAllData());
@@ -84,10 +88,35 @@ function doGet(e) {
   }
 }
 
+/**
+ * Si en Script Properties hay una clave de acceso configurada
+ * ("APP_PASSWORD"), exige que cada pedido a la API la incluya y coincida.
+ * Si TODAVÍA no configuraste ninguna clave, no exige nada (para no romper
+ * el sistema si todavía no la activaste) — ver LEEME para activarla.
+ * Devuelve null si está todo bien, o una respuesta de error para cortar
+ * la ejecución si la clave falta o es incorrecta.
+ */
+function chequearClave(claveRecibida) {
+  const claveGuardada = PropertiesService.getScriptProperties().getProperty('APP_PASSWORD');
+  if (!claveGuardada) return null; // no hay clave configurada: acceso libre
+  if (claveRecibida === claveGuardada) return null;
+  return jsonOut({ error: 'No autorizado', unauthorized: true });
+}
+
 function doPost(e) {
   try {
     const body = JSON.parse(e.postData.contents);
     const action = body.action;
+
+    if (action === 'login') {
+      const claveGuardada = PropertiesService.getScriptProperties().getProperty('APP_PASSWORD');
+      if (!claveGuardada) return jsonOut({ success: true }); // sin clave configurada: entra cualquiera
+      if (body.clave === claveGuardada) return jsonOut({ success: true });
+      return jsonOut({ error: 'Clave incorrecta', unauthorized: true });
+    }
+
+    const noAutorizado = chequearClave(body.clave);
+    if (noAutorizado) return noAutorizado;
 
     if (action === 'saveModule') {
       saveModuleData(body.module, body.rows);
