@@ -330,6 +330,10 @@ function waPhonePill(s, moduleKey, row) {
     const modalidad = row['Modalidad'] || 'Presencial';
     text = `Hola${paciente ? ' ' + paciente : ''}, te escribimos del consultorio del Dr. Ciavarelli para recordarte tu turno` +
       (fecha ? ` del ${fecha}` : '') + (hora ? ` a las ${hora}` : '') + ` (${modalidad}).`;
+    if (modalidad === 'Teleconsulta') {
+      text += ' Al optar por esta modalidad, das tu conformidad para ser atendido/a por teleconsulta. ' +
+        'El link de conexión te lo mandamos aparte, una vez confirmado el pago.';
+    }
   } else if (moduleKey === 'pacientes' && row) {
     const apellido = row['Apellido'] || '';
     text = `Hola${apellido ? ' ' + apellido : ''}, te escribimos del consultorio del Dr. Ciavarelli.`;
